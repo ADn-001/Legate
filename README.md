@@ -42,8 +42,6 @@ legate/
 
 ### 1. Clone and enter the repo
 
-Once you have connected your local directory to the remote (see section below), run:
-
 ```bash
 git clone <your-repo-url> legate
 cd legate
