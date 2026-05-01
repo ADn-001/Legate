@@ -95,36 +95,6 @@ cd backend
 source .venv/bin/activate
 pytest --cov=app tests/
 ```
-
----
-
-## Connecting your local directory to the GitHub remote
-
-Run the following commands from inside your local project root directory in WSL:
-
-```bash
-# 1. Initialise git in the local directory (if not already done)
-git init
-
-# 2. Stage all files
-git add .
-
-# 3. Create the initial commit
-git commit -m "feat: initial backend scaffold"
-
-# 4. Rename the default branch to main
-git branch -M main
-
-# 5. Add the GitHub remote
-#    Replace the URL below with your actual repository URL
-git remote add origin https://github.com/<your-username>/<your-repo-name>.git
-
-# 6. Push to GitHub
-git push -u origin main
-```
-
-If you have already initialised git and the remote is already set, skip steps 1 and 5 and just run:
-
 ```bash
 git add .
 git commit -m "feat: initial backend scaffold"
