@@ -1,0 +1,71 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/**
+ * Global styles for Legate app
+ * - Design tokens (colors, typography)
+ * - Global resets
+ * - Utility classes
+ */
+
+:root {
+  --color-bg-primary: #F0F2F5;
+  --color-bg-card: #FFFFFF;
+  --color-primary: #3D4F6B;
+  --color-text-primary: #0D1117;
+  --color-text-secondary: #6B7280;
+  --color-danger: #C0392B;
+  --color-success: #22C55E;
+  --color-border: #E5E7EB;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell',
+    'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: var(--color-bg-primary);
+  color: var(--color-text-primary);
+}
+
+/* Custom component classes */
+.card {
+  @apply bg-white rounded-xl shadow;
+}
+
+.btn-primary {
+  @apply bg-[#3D4F6B] text-white rounded-2xl py-4 font-semibold;
+}
+
+.btn-secondary {
+  @apply bg-gray-100 text-gray-800 rounded-2xl py-4;
+}
+
+.btn-danger {
+  @apply bg-[#C0392B] text-white rounded-2xl py-4 font-semibold;
+}
+
+.input-field {
+  @apply bg-white border border-gray-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#3D4F6B];
+}
+
+.security-banner {
+  @apply bg-blue-50 border border-blue-200 rounded-lg p-4 flex items-start gap-3;
+}
+
+.status-pill {
+  @apply inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-semibold;
+}
+
+.status-pill--active {
+  @apply bg-green-100 text-green-800;
+}
+
+.status-pill--pending {
+  @apply bg-gray-100 text-gray-600;
+}
+
+.status-pill--error {
+  @apply bg-red-100 text-red-800;
+}
