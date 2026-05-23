@@ -2,12 +2,12 @@
 
 import uuid
 from datetime import datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from app.db.models.capsule import CapsuleStatus
 
 
 class CapsuleCreate(BaseModel):
-    title: str
+    title: str = Field(..., max_length=255)
     beneficiary_id: uuid.UUID
     cipher_iv: str  # base64-encoded
     content_hash: str | None = None

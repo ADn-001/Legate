@@ -11,6 +11,8 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
+from fastapi import HTTPException, status as http_status
+
 from app.config import get_settings
 from app.core.supabase import get_supabase
 from app.core.audit import write_audit
@@ -32,8 +34,26 @@ class AuthService:
         delivery_encrypted_cek: str | None = None,
         delivery_cek_iv: str | None = None,
     ) -> dict:
+        existing = await self.db.execute(select(User).where(User.email == email))
+        if existing.scalar_one_or_none():
+            raise HTTPException(
+                status_code=http_status.HTTP_409_CONFLICT,
+                detail="Email already registered",
+            )
         supabase = get_supabase()
-        response = supabase.auth.sign_up({"email": email, "password": password})
+        try:
+            response = supabase.auth.sign_up({"email": email, "password": password})
+        except Exception as exc:
+            err_str = str(exc).lower()
+            if "rate" in err_str or "limit" in err_str:
+                raise HTTPException(
+                    status_code=http_status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail="Email rate limit exceeded — try again later",
+                )
+            raise HTTPException(
+                status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Auth service unavailable: {exc}",
+            )
         if not response.user:
             raise ValueError("Supabase signup failed")
 
@@ -106,9 +126,12 @@ class AuthService:
 
     async def login(self, email: str, password: str) -> dict:
         supabase = get_supabase()
-        response = supabase.auth.sign_in_with_password({"email": email, "password": password})
+        try:
+            response = supabase.auth.sign_in_with_password({"email": email, "password": password})
+        except Exception:
+            raise HTTPException(status_code=http_status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
         if not response.session:
-            raise ValueError("Login failed")
+            raise HTTPException(status_code=http_status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
         result = await self.db.execute(select(User).where(User.email == email))
         user = result.scalar_one_or_none()
@@ -126,9 +149,12 @@ class AuthService:
 
     async def refresh(self, refresh_token: str) -> dict:
         supabase = get_supabase()
-        response = supabase.auth.refresh_session(refresh_token)
+        try:
+            response = supabase.auth.refresh_session(refresh_token)
+        except Exception:
+            raise HTTPException(status_code=http_status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
         if not response.session:
-            raise ValueError("Token refresh failed")
+            raise HTTPException(status_code=http_status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
         return {
             "access_token": response.session.access_token,
             "refresh_token": response.session.refresh_token,
@@ -145,9 +171,12 @@ class AuthService:
     async def delete_account(self, user: User, password: str) -> None:
         supabase = get_supabase()
         # Re-authenticate to confirm password
-        response = supabase.auth.sign_in_with_password({"email": user.email, "password": password})
+        try:
+            response = supabase.auth.sign_in_with_password({"email": user.email, "password": password})
+        except Exception:
+            raise HTTPException(status_code=http_status.HTTP_401_UNAUTHORIZED, detail="Invalid password")
         if not response.session:
-            raise ValueError("Password confirmation failed")
+            raise HTTPException(status_code=http_status.HTTP_401_UNAUTHORIZED, detail="Invalid password")
 
         user.status = UserStatus.deleted
         user.erasure_requested_at = datetime.now(timezone.utc)

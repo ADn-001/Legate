@@ -47,7 +47,10 @@ class BeneficiaryService:
         self.db.add(beneficiary)
         await self.db.flush()
 
-        send_nomination_email(to=email, nominator_name=nominator_name)
+        try:
+            send_nomination_email(to=email, nominator_name=nominator_name)
+        except Exception:
+            pass  # Email delivery failure must not block beneficiary creation
         await write_audit(self.db, "beneficiary_added", user_id=user_id, resource_id=beneficiary.id)
         await self.db.commit()
         return beneficiary
@@ -90,7 +93,10 @@ class BeneficiaryService:
                 setattr(beneficiary, attr, kwargs[key])
 
         if "email" in kwargs and kwargs["email"] and kwargs["email"] != old_email:
-            send_nomination_email(to=kwargs["email"], nominator_name=nominator_name)
+            try:
+                send_nomination_email(to=kwargs["email"], nominator_name=nominator_name)
+            except Exception:
+                pass
 
         await write_audit(self.db, "beneficiary_updated", user_id=user_id, resource_id=beneficiary_id)
         await self.db.commit()
