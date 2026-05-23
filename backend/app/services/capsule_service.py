@@ -9,7 +9,7 @@ from sqlalchemy import select, func, and_
 
 from app.config import get_settings
 from app.core.audit import write_audit
-from app.core.supabase import get_supabase
+from app.core.supabase import get_storage
 from app.db.models.beneficiary import Beneficiary
 from app.db.models.capsule import Capsule, CapsuleStatus, CapsuleRecipient, RecipientStatus
 
@@ -24,7 +24,7 @@ class CapsuleService:
             .where(
                 and_(
                     Capsule.user_id == user_id,
-                    Capsule.status.notin_([CapsuleStatus.deleted]),
+                    Capsule.status.notin_([CapsuleStatus.deleted, CapsuleStatus.pending_deletion]),
                 )
             )
             .order_by(Capsule.delivery_order)
@@ -73,14 +73,17 @@ class CapsuleService:
         )
         self.db.add(recipient)
 
-        # Generate signed upload URL
+        # Generate signed upload URL using isolated storage client (service role key,
+        # not contaminated by user SIGNED_IN events from auth operations)
         cfg = get_settings()
-        supabase = get_supabase()
         storage_path = f"{user_id}/{capsule.id}/content.enc"
         try:
-            upload_response = supabase.storage.from_(cfg.supabase_storage_bucket_content).create_signed_upload_url(storage_path)
+            storage = get_storage()
+            upload_response = storage.from_(cfg.supabase_storage_bucket_content).create_signed_upload_url(storage_path)
             upload_url = upload_response.get("signedURL") or upload_response.get("signed_url", "")
-        except Exception:
+        except Exception as _e:
+            import logging
+            logging.getLogger(__name__).error("upload_url generation failed: %s", _e)
             upload_url = ""
 
         await write_audit(self.db, "capsule_created", user_id=user_id, resource_id=capsule.id)
