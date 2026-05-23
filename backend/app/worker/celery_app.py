@@ -28,11 +28,15 @@ celery_app.conf.update(
     beat_schedule={
         "dispatch-checkin-emails": {
             "task": "app.worker.tasks.checkin_tasks.dispatch_due_checkins",
-            "schedule": 3600.0,  # Every hour
+            "schedule": 3600.0,
         },
         "check-grace-periods": {
             "task": "app.worker.tasks.checkin_tasks.check_grace_periods",
-            "schedule": 3600.0,  # Every hour
+            "schedule": 3600.0,
+        },
+        "send-grace-reminders": {
+            "task": "app.worker.tasks.checkin_tasks.send_grace_period_reminders",
+            "schedule": 43200.0,  # Every 12h
         },
     },
 )

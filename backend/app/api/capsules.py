@@ -2,14 +2,23 @@
 Capsule CRUD routes.
 """
 
+import uuid
+from pydantic import BaseModel
+
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db_session
 from app.dependencies import get_current_verified_user
 from app.schemas.capsule import CapsuleCreate, CapsuleUpdate, CapsuleResponse
+from app.services.capsule_service import CapsuleService
 
 router = APIRouter()
+
+
+class CapsuleCreateResponse(BaseModel):
+    id: uuid.UUID
+    upload_url: str
 
 
 @router.get("/", response_model=list[CapsuleResponse])
@@ -17,57 +26,53 @@ async def list_capsules(
     db: AsyncSession = Depends(get_db_session),
     current_user=Depends(get_current_verified_user),
 ):
-    """List all capsules for the authenticated user."""
-    # TODO: delegate to CapsuleService.list_for_user
-    raise NotImplementedError
+    svc = CapsuleService(db)
+    return await svc.list_for_user(current_user.id)
 
 
-@router.post("/", status_code=status.HTTP_201_CREATED, response_model=CapsuleResponse)
+@router.post("/", status_code=status.HTTP_201_CREATED, response_model=CapsuleCreateResponse)
 async def create_capsule(
     body: CapsuleCreate,
     db: AsyncSession = Depends(get_db_session),
     current_user=Depends(get_current_verified_user),
 ):
-    """
-    Create capsule metadata record.
-    Returns upload URLs for the encrypted content blob.
-    """
-    # TODO: delegate to CapsuleService.create
-    raise NotImplementedError
+    svc = CapsuleService(db)
+    result = await svc.create(
+        user_id=current_user.id,
+        title=body.title,
+        beneficiary_id=body.beneficiary_id,
+        cipher_iv=body.cipher_iv,
+        content_hash=body.content_hash,
+    )
+    return CapsuleCreateResponse(**result)
 
 
 @router.get("/{capsule_id}", response_model=CapsuleResponse)
 async def get_capsule(
-    capsule_id: str,
+    capsule_id: uuid.UUID,
     db: AsyncSession = Depends(get_db_session),
     current_user=Depends(get_current_verified_user),
 ):
-    """Get a single capsule by ID."""
-    # TODO: delegate to CapsuleService.get_by_id, enforce ownership
-    raise NotImplementedError
+    svc = CapsuleService(db)
+    return await svc.get_by_id(capsule_id, current_user.id)
 
 
 @router.patch("/{capsule_id}", response_model=CapsuleResponse)
 async def update_capsule(
-    capsule_id: str,
+    capsule_id: uuid.UUID,
     body: CapsuleUpdate,
     db: AsyncSession = Depends(get_db_session),
     current_user=Depends(get_current_verified_user),
 ):
-    """Update capsule metadata (title, storage path, delivery order)."""
-    # TODO: delegate to CapsuleService.update
-    raise NotImplementedError
+    svc = CapsuleService(db)
+    return await svc.update(capsule_id, current_user.id, **body.model_dump(exclude_none=True))
 
 
 @router.delete("/{capsule_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_capsule(
-    capsule_id: str,
+    capsule_id: uuid.UUID,
     db: AsyncSession = Depends(get_db_session),
     current_user=Depends(get_current_verified_user),
 ):
-    """
-    Mark capsule as pending_deletion.
-    Enqueues async Supabase Storage purge task (24h).
-    """
-    # TODO: delegate to CapsuleService.delete, enqueue cleanup_tasks.purge_capsule
-    raise NotImplementedError
+    svc = CapsuleService(db)
+    await svc.delete(capsule_id, current_user.id)

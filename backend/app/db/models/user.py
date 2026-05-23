@@ -21,8 +21,9 @@ class User(Base, TimestampMixin):
     __tablename__ = "users"
 
     id: MappedColumn[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    supabase_uid: MappedColumn[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
     email: MappedColumn[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
-    password_hash: MappedColumn[str] = mapped_column(String(255), nullable=False)
+    password_hash: MappedColumn[str | None] = mapped_column(String(255), nullable=True)
     email_verified: MappedColumn[bool] = mapped_column(Boolean, default=False)
     full_name: MappedColumn[str | None] = mapped_column(String(255), nullable=True)
     phone: MappedColumn[str | None] = mapped_column(String(32), nullable=True)
@@ -63,6 +64,8 @@ class EncryptionKey(Base):
     cek_iv: MappedColumn[bytes] = mapped_column(nullable=False)
     pbkdf2_salt: MappedColumn[bytes] = mapped_column(nullable=False)
     pbkdf2_iterations: MappedColumn[int] = mapped_column(Integer, default=100000)
+    delivery_encrypted_cek: MappedColumn[bytes | None] = mapped_column(nullable=True)
+    delivery_cek_iv: MappedColumn[bytes | None] = mapped_column(nullable=True)
     recovery_phrase_hash: MappedColumn[str | None] = mapped_column(String(255), nullable=True)
     created_at: MappedColumn[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: MappedColumn[datetime] = mapped_column(DateTime(timezone=True))
