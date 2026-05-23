@@ -23,7 +23,7 @@ class Beneficiary(Base, TimestampMixin):
     user_id: MappedColumn[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     full_name: MappedColumn[str] = mapped_column(String(255), nullable=False)
     email: MappedColumn[str] = mapped_column(String(255), nullable=False)
-    relationship: MappedColumn[str | None] = mapped_column(String(64), nullable=True)
+    relationship_type: MappedColumn[str | None] = mapped_column(String(64), nullable=True, name="relationship")
     is_emergency_contact: MappedColumn[bool] = mapped_column(Boolean, default=False)
     status: MappedColumn[BeneficiaryStatus] = mapped_column(SAEnum(BeneficiaryStatus), default=BeneficiaryStatus.pending)
     invited_at: MappedColumn[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -5,7 +5,7 @@ SQLAlchemy ORM models for check-in schedules, events, and release triggers.
 import uuid
 import enum
 from datetime import datetime
-from sqlalchemy import String, Boolean, DateTime, Enum as SAEnum, ForeignKey, Integer, INET, Text
+from sqlalchemy import String, Boolean, DateTime, Enum as SAEnum, ForeignKey, Integer, Text
 from sqlalchemy.orm import mapped_column, MappedColumn, relationship
 from sqlalchemy.dialects.postgresql import JSONB
 from app.db.base import Base, TimestampMixin
@@ -52,6 +52,7 @@ class CheckInSchedule(Base, TimestampMixin):
     snooze_limit: MappedColumn[int] = mapped_column(Integer, default=2)
     is_paused: MappedColumn[bool] = mapped_column(Boolean, default=False)
     pause_count: MappedColumn[int] = mapped_column(Integer, default=0)
+    grace_reminder_sent_at: MappedColumn[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     user = relationship("User", back_populates="checkin_schedule")
     events = relationship("CheckInEvent", back_populates="schedule", cascade="all, delete-orphan")

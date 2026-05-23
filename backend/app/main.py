@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.api import auth, capsules, beneficiaries, checkin, settings, users
+from app.api import activity
 
 cfg = get_settings()
 
@@ -33,6 +34,7 @@ app.include_router(capsules.router, prefix="/capsules", tags=["capsules"])
 app.include_router(beneficiaries.router, prefix="/beneficiaries", tags=["beneficiaries"])
 app.include_router(checkin.router, prefix="/checkin", tags=["check-in"])
 app.include_router(settings.router, prefix="/settings", tags=["settings"])
+app.include_router(activity.router, prefix="/activity", tags=["activity"])
 
 
 @app.get("/health", tags=["system"])

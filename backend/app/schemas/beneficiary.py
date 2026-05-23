@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import datetime
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from app.db.models.beneficiary import BeneficiaryStatus
 
 
@@ -24,9 +24,10 @@ class BeneficiaryResponse(BaseModel):
     id: uuid.UUID
     full_name: str
     email: str
-    relationship: str | None
+    # reads from ORM attribute relationship_type; serializes as "relationship"
+    relationship: str | None = Field(None, validation_alias="relationship_type")
     is_emergency_contact: bool
     status: BeneficiaryStatus
     created_at: datetime
 
-    model_config = {"from_attributes": True}
+    model_config = {"from_attributes": True, "populate_by_name": True}

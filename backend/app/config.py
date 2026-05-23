@@ -37,6 +37,11 @@ class Settings(BaseSettings):
     # PBKDF2
     pbkdf2_iterations: int = 100000
 
+    # Supabase JWT + delivery
+    supabase_jwt_secret: str = "fake-jwt-secret"
+    delivery_secret: str = "fake-delivery-secret"
+    base_url: str = "http://localhost:8000"
+
     # Storage
     supabase_storage_bucket_content: str = "capsule-content"
     supabase_storage_bucket_media: str = "media-attachments"
