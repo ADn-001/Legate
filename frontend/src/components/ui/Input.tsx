@@ -1,29 +1,25 @@
-/**
- * Input Component
- * - Text input with label
- * - Error state
- * - Help text
- */
-
 interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
   label?: string
   error?: string
   helpText?: string
 }
 
-export default function Input({ label, error, helpText, ...props }: InputProps) {
-  // TODO: Implement Input component
-  // - Label + input field
-  // - Border: border-gray-200, rounded-xl
-  // - Focus: ring focus state
-  // - Error state: red border + error message
-  // - Help text below input
+export default function Input({ label, error, helpText, id, ...props }: InputProps) {
+  const inputId = id || label?.toLowerCase().replace(/\s+/g, '-')
   return (
-    <div>
-      {label && <label>{label}</label>}
-      <input {...props} />
-      {error && <span>{error}</span>}
-      {helpText && <span>{helpText}</span>}
+    <div className="space-y-1">
+      {label && (
+        <label htmlFor={inputId} className="block text-sm font-medium text-[#0D1117]">
+          {label}
+        </label>
+      )}
+      <input
+        id={inputId}
+        className={`input-field w-full ${error ? 'border-red-500 focus:ring-red-500' : ''}`}
+        {...props}
+      />
+      {error && <p className="text-xs text-red-600">{error}</p>}
+      {helpText && !error && <p className="text-xs text-[#6B7280]">{helpText}</p>}
     </div>
   )
 }

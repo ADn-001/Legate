@@ -1,20 +1,15 @@
-/**
- * Security Banner Component
- * - Informational banner with shield icon
- * - Used for security notices (e.g., "They will only receive instructions...")
- */
+import { Shield } from 'lucide-react'
 
 interface SecurityBannerProps {
   children: React.ReactNode
-  variant?: 'info' | 'warning'
+  className?: string
 }
 
-export default function SecurityBanner({ children, variant = 'info' }: SecurityBannerProps) {
-  // TODO: Implement SecurityBanner component
-  // - Shield icon left
-  // - Soft blue background (#E5F4FF or similar)
-  // - Small text size
-  // - Subtle border
-  // - Padding around content
-  return <div>{children}</div>
+export default function SecurityBanner({ children, className = '' }: SecurityBannerProps) {
+  return (
+    <div className={`security-banner ${className}`}>
+      <Shield className="w-5 h-5 text-[#3D4F6B] flex-shrink-0 mt-0.5" />
+      <div className="text-sm text-[#3D4F6B]">{children}</div>
+    </div>
+  )
 }

@@ -1,15 +1,21 @@
-/**
- * App Shell - Layout wrapper for authenticated pages
- * - Top bar
- * - Bottom navigation (4 tabs: Vault, People, Security, Activity)
- * - Main content area
- */
+import { useLocation } from 'react-router-dom'
+import TopBar from './TopBar'
+import BottomNav from './BottomNav'
 
-export default function AppShell() {
-  // TODO: Implement AppShell
-  // - TopBar component (Legate logo, avatar)
-  // - Main content area (children)
-  // - BottomNav component (4 tabs: Vault, People, Security, Activity)
-  // - Hide bottom nav on /auth/*, /setup/*, /tokenized/* pages
-  return <div>App Shell</div>
+const hideNavPaths = ['/auth/', '/setup/', '/checkin/', '/emergency/']
+
+export default function AppShell({ children }: { children: React.ReactNode }) {
+  const location = useLocation()
+  const hideNav = hideNavPaths.some(p => location.pathname.startsWith(p))
+    || location.pathname === '/'
+
+  return (
+    <div className="min-h-screen bg-[#F0F2F5] flex flex-col">
+      {!hideNav && <TopBar />}
+      <main className={`flex-1 ${!hideNav ? 'pb-20' : ''}`}>
+        {children}
+      </main>
+      {!hideNav && <BottomNav />}
+    </div>
+  )
 }

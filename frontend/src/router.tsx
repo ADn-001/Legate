@@ -1,4 +1,7 @@
+import React from 'react'
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
+import { useAuthStore } from './store/auth'
+import AppShell from './components/layout/AppShell'
 
 // Pages
 import Landing from './pages/Landing'
@@ -20,47 +23,49 @@ import CheckinConfirm from './pages/tokenized/CheckinConfirm'
 import CheckinSnooze from './pages/tokenized/CheckinSnooze'
 import EmergencyPause from './pages/tokenized/EmergencyPause'
 
+function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  const isAuthenticated = useAuthStore(s => s.isAuthenticated)
+  if (!isAuthenticated) return <Navigate to="/auth/login" replace />
+  return <>{children}</>
+}
+
 export function AppRouter() {
   return (
     <Router>
-      <Routes>
-        {/* Unauthenticated routes */}
-        <Route path="/" element={<Landing />} />
-        <Route path="/auth/login" element={<Login />} />
-        <Route path="/auth/signup" element={<Signup />} />
-        <Route path="/auth/verify-email" element={<VerifyEmail />} />
+      <AppShell>
+        <Routes>
+          {/* Unauthenticated routes */}
+          <Route path="/" element={<Landing />} />
+          <Route path="/auth/login" element={<Login />} />
+          <Route path="/auth/signup" element={<Signup />} />
+          <Route path="/auth/verify-email" element={<VerifyEmail />} />
 
-        {/* Setup wizard */}
-        <Route path="/setup" element={<SetupLayout />}>
-          <Route path="checkin" element={<StepCheckin />} />
-          <Route path="beneficiary" element={<StepBeneficiary />} />
-          <Route path="capsule" element={<StepCapsule />} />
-          <Route path="recovery" element={<StepRecovery />} />
-        </Route>
+          {/* Setup wizard — requires auth */}
+          <Route path="/setup" element={<ProtectedRoute><SetupLayout /></ProtectedRoute>}>
+            <Route path="checkin" element={<StepCheckin />} />
+            <Route path="beneficiary" element={<StepBeneficiary />} />
+            <Route path="capsule" element={<StepCapsule />} />
+            <Route path="recovery" element={<StepRecovery />} />
+          </Route>
 
-        {/* Authenticated routes */}
-        <Route path="/vault" element={<Dashboard />} />
-        <Route path="/vault/capsules" element={<CapsuleList />} />
-        <Route path="/vault/capsules/new" element={<CapsuleEditor />} />
-        <Route path="/vault/capsules/:id" element={<CapsuleEditor />} />
+          {/* Authenticated routes */}
+          <Route path="/vault" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+          <Route path="/vault/capsules" element={<ProtectedRoute><CapsuleList /></ProtectedRoute>} />
+          <Route path="/vault/capsules/new" element={<ProtectedRoute><CapsuleEditor /></ProtectedRoute>} />
+          <Route path="/vault/capsules/:id" element={<ProtectedRoute><CapsuleEditor /></ProtectedRoute>} />
+          <Route path="/people" element={<ProtectedRoute><Beneficiaries /></ProtectedRoute>} />
+          <Route path="/security" element={<ProtectedRoute><Security /></ProtectedRoute>} />
+          <Route path="/activity" element={<ProtectedRoute><Activity /></ProtectedRoute>} />
 
-        {/* Beneficiary management */}
-        <Route path="/people" element={<Beneficiaries />} />
+          {/* Tokenized (no auth required) routes */}
+          <Route path="/checkin/confirm" element={<CheckinConfirm />} />
+          <Route path="/checkin/snooze" element={<CheckinSnooze />} />
+          <Route path="/checkin/emergency/pause" element={<EmergencyPause />} />
 
-        {/* Security settings */}
-        <Route path="/security" element={<Security />} />
-
-        {/* Activity log */}
-        <Route path="/activity" element={<Activity />} />
-
-        {/* Tokenized (no auth required) routes */}
-        <Route path="/checkin/confirm" element={<CheckinConfirm />} />
-        <Route path="/checkin/snooze" element={<CheckinSnooze />} />
-        <Route path="/emergency/pause" element={<EmergencyPause />} />
-
-        {/* Fallback */}
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+          {/* Fallback */}
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </AppShell>
     </Router>
   )
 }

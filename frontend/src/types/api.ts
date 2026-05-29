@@ -1,54 +1,51 @@
-/**
- * API Response Types
- * - User, Capsule, Beneficiary, CheckinSchedule, AuditLog, etc.
- */
-
 export interface User {
   id: string
   email: string
-  firstName?: string
-  lastName?: string
-  createdAt: string
-  updatedAt: string
+  full_name?: string
+  email_verified: boolean
+  status: string
+  created_at: string
+  needs_onboarding: boolean
 }
 
 export interface Capsule {
   id: string
-  userId: string
+  user_id: string
   title: string
-  content: string // Encrypted
-  beneficiaries: Beneficiary[]
-  status: 'draft' | 'active' | 'delivered'
-  inactivityPeriodDays: number
-  createdAt: string
-  updatedAt: string
+  beneficiary_id: string | null
+  cipher_iv: string
+  storage_object_path: string | null
+  status: 'draft' | 'active' | 'pending_deletion' | 'deleted' | 'delivered'
+  created_at: string
+  updated_at: string
 }
 
 export interface Beneficiary {
   id: string
-  userId: string
-  firstName: string
-  lastName: string
+  user_id: string
+  full_name: string
   email: string
   relationship?: string
-  isEmergencyContact: boolean
-  createdAt: string
-  updatedAt: string
+  is_emergency_contact: boolean
+  status: 'active' | 'pending' | 'removed'
+  created_at: string
+  updated_at: string
 }
 
 export interface CheckinSchedule {
-  id: string
-  userId: string
-  checkInIntervalDays: number
-  gracePeriodDays: number
-  lastCheckinAt?: string
-  nextCheckinAt?: string
+  interval_days: number
+  grace_period_days: number
+  next_dispatch_at: string | null
+  last_confirmed_at: string | null
+  snooze_count: number
+  snooze_limit: number
 }
 
-export interface AuditLog {
+export interface ActivityEntry {
   id: string
-  userId: string
-  eventType: string
-  metadata?: Record<string, any>
-  createdAt: string
+  event_type: string
+  resource_type: string | null
+  resource_id: string | null
+  description: string | null
+  created_at: string
 }

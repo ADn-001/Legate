@@ -1,22 +1,24 @@
-/**
- * Auth API endpoints
- * - POST /auth/signup
- * - POST /auth/verify-email
- * - POST /auth/login
- * - GET /auth/me
- * - GET /auth/me/encryption-key
- * - POST /auth/refresh
- * - POST /auth/logout
- */
-
 import client from './client'
 
+export interface SignupPayload {
+  email: string
+  password: string
+  encrypted_cek: string
+  cek_iv: string
+  pbkdf2_salt: string
+  delivery_encrypted_cek: string | null
+  delivery_cek_iv: string | null
+}
+
 export const authApi = {
-  signup: (data: any) => client.post('/auth/signup', data),
-  verifyEmail: (data: any) => client.post('/auth/verify-email', data),
-  login: (data: any) => client.post('/auth/login', data),
+  signup: (data: SignupPayload) => client.post('/auth/signup', data),
+  verifyEmail: (data: { email: string; otp: string }) => client.post('/auth/verify-email', data),
+  login: (data: { email: string; password: string }) => client.post('/auth/login', data),
+  refresh: (data: { refresh_token: string }) => client.post('/auth/refresh', data),
+  logout: (data: { refresh_token: string }) => client.post('/auth/logout', data),
   getMe: () => client.get('/auth/me'),
   getEncryptionKey: () => client.get('/auth/me/encryption-key'),
-  refresh: (data: any) => client.post('/auth/refresh', data),
-  logout: () => client.post('/auth/logout'),
+  getDeliveryWrappingKey: () => client.get('/auth/me/delivery-wrapping-key'),
+  updateDeliveryKey: (data: { delivery_encrypted_cek: string; delivery_cek_iv: string }) =>
+    client.patch('/auth/me/encryption-key', data),
 }

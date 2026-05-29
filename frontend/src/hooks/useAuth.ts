@@ -1,10 +1,1 @@
-/**
- * useAuth hook
- * Provides auth operations and state
- */
-
-import { useAuthStore } from '../store/auth'
-
-export const useAuth = () => {
-  return useAuthStore()
-}
+export { useAuthStore as useAuth } from '../store/auth'
