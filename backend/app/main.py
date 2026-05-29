@@ -20,9 +20,12 @@ app = FastAPI(
     openapi_url="/openapi.json",
 )
 
+_dev_origins = [f"http://localhost:{p}" for p in range(5173, 5180)] + \
+               [f"http://127.0.0.1:{p}" for p in range(5173, 5180)]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],  # TODO: restrict in production
+    allow_origins=_dev_origins,  # TODO: restrict in production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

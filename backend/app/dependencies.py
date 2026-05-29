@@ -9,6 +9,8 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
+from sqlalchemy.orm import selectinload
+
 from app.config import get_settings
 from app.db.session import get_db_session
 from app.db.models.user import User
@@ -71,7 +73,9 @@ async def get_current_user(
     except Exception:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
-    result = await db.execute(select(User).where(User.supabase_uid == supabase_user_id))
+    result = await db.execute(
+        select(User).options(selectinload(User.settings)).where(User.supabase_uid == supabase_user_id)
+    )
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")

@@ -3,8 +3,10 @@ Authentication routes: signup, login, logout, token refresh, email verification.
 """
 
 import base64
+from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -20,6 +22,11 @@ from app.schemas.user import UserResponse
 from app.services.auth_service import AuthService
 
 router = APIRouter()
+
+
+class UpdateDeliveryKeyRequest(BaseModel):
+    delivery_encrypted_cek: str   # base64
+    delivery_cek_iv: str          # base64
 
 
 @router.post("/signup", status_code=status.HTTP_201_CREATED)
@@ -64,7 +71,15 @@ async def logout(body: RefreshRequest, db: AsyncSession = Depends(get_db_session
 
 @router.get("/me", response_model=UserResponse)
 async def get_me(current_user=Depends(get_current_verified_user)):
-    return current_user
+    return UserResponse(
+        id=current_user.id,
+        email=current_user.email,
+        full_name=current_user.full_name,
+        email_verified=current_user.email_verified,
+        status=current_user.status,
+        created_at=current_user.created_at,
+        needs_onboarding=current_user.settings.needs_onboarding if current_user.settings else True,
+    )
 
 
 @router.get("/me/encryption-key", response_model=EncryptionKeyResponse)
@@ -98,3 +113,20 @@ async def get_delivery_wrapping_key(
         hashlib.sha256,
     ).hexdigest()
     return DeliveryWrappingKeyResponse(wrapping_key=key)
+
+
+@router.patch("/me/encryption-key", status_code=200)
+async def update_delivery_key(
+    body: UpdateDeliveryKeyRequest,
+    db: AsyncSession = Depends(get_db_session),
+    current_user=Depends(get_current_verified_user),
+):
+    result = await db.execute(select(EncryptionKey).where(EncryptionKey.user_id == current_user.id))
+    key = result.scalar_one_or_none()
+    if not key:
+        raise HTTPException(status_code=404, detail="Encryption key not found")
+    key.delivery_encrypted_cek = base64.b64decode(body.delivery_encrypted_cek)
+    key.delivery_cek_iv = base64.b64decode(body.delivery_cek_iv)
+    key.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"status": "updated"}

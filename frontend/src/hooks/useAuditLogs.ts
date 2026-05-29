@@ -1,7 +1,8 @@
-/**
- * useAuditLogs hook
- * React Query hook for audit log/activity retrieval
- */
+import { useQuery } from '@tanstack/react-query'
+import { activityApi } from '../api/activity'
 
-// TODO: Implement with React Query
-// export const useAuditLogs = () => {}
+export const useAuditLogs = (page = 1) =>
+  useQuery({
+    queryKey: ['activity', page],
+    queryFn: () => activityApi.list({ page, per_page: 20 }).then(r => r.data),
+  })

@@ -13,5 +13,6 @@ class UserResponse(BaseModel):
     email_verified: bool
     status: UserStatus
     created_at: datetime
+    needs_onboarding: bool = True
 
     model_config = {"from_attributes": True}

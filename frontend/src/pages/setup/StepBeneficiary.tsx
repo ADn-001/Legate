@@ -1,14 +1,51 @@
-/**
- * Setup Step 2: First Beneficiary (/setup/beneficiary)
- * - Full Name, Email Address, Relationship (optional dropdown)
- * - Add Beneficiary & Continue button
- */
+import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { beneficiariesApi } from '../../api/beneficiaries'
+import BeneficiaryForm from '../../components/beneficiary/BeneficiaryForm'
+import SecurityBanner from '../../components/ui/SecurityBanner'
+import { BeneficiaryCreatePayload } from '../../api/beneficiaries'
 
 export default function StepBeneficiary() {
-  // TODO: Implement Beneficiary Step
-  // - Heading: "Who should receive your legacy?"
-  // - Fields: Full Name, Email Address, Relationship (optional)
-  // - Security notice: "They will only receive instructions, not account access."
-  // - Add Beneficiary & Continue button → POST /beneficiaries, navigate to /setup/capsule
-  return <div>Step 2: First Beneficiary</div>
+  const navigate = useNavigate()
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const handleSubmit = async (data: BeneficiaryCreatePayload) => {
+    setLoading(true)
+    setError(null)
+    try {
+      await beneficiariesApi.create(data)
+      navigate('/setup/capsule')
+    } catch {
+      setError('Failed to add beneficiary. Please try again.')
+      throw new Error('Failed')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="max-w-md mx-auto px-4 pb-8">
+      <div className="bg-white rounded-2xl shadow-lg p-8">
+        <h1 className="text-2xl font-bold text-[#0D1117] mb-2">Who should receive your legacy?</h1>
+        <p className="text-[#6B7280] mb-6">Add the first person who will receive your capsules.</p>
+
+        <SecurityBanner className="mb-6">
+          They will only receive instructions, not account access. Your beneficiaries cannot modify your settings.
+        </SecurityBanner>
+
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4">
+            <p className="text-sm text-red-700">{error}</p>
+          </div>
+        )}
+
+        <BeneficiaryForm
+          onSubmit={handleSubmit}
+          onCancel={() => navigate('/setup/checkin')}
+          loading={loading}
+        />
+      </div>
+    </div>
+  )
 }

@@ -1,20 +1,40 @@
 import { useNavigate } from 'react-router-dom'
 import { Lock, Users, Shield, Clock, Plus, Eye } from 'lucide-react'
+import { useAuthStore } from '../../store/auth'
+import { useCheckinSchedule } from '../../hooks/useCheckinSchedule'
+import { useCapsules } from '../../hooks/useCapsules'
+import { useBeneficiaries } from '../../hooks/useBeneficiaries'
+import { useAuditLogs } from '../../hooks/useAuditLogs'
+import { formatDate, formatRelativeTime } from '../../utils/dates'
+import { getEventLabel } from '../../utils/audit'
+import { ActivityEntry, CheckinSchedule } from '../../types/api'
+
+function deriveVaultStatus(schedule: CheckinSchedule | undefined) {
+  if (!schedule?.next_dispatch_at) return { color: 'bg-[#22C55E]', label: 'VAULT STATUS: ACTIVE' }
+  const diff = new Date(schedule.next_dispatch_at).getTime() - Date.now()
+  if (diff < 0) return { color: 'bg-red-500', label: 'VAULT STATUS: OVERDUE' }
+  if (diff < 3 * 86400000) return { color: 'bg-amber-400', label: 'VAULT STATUS: DUE SOON' }
+  return { color: 'bg-[#22C55E]', label: 'VAULT STATUS: ACTIVE' }
+}
 
 export default function Dashboard() {
   const navigate = useNavigate()
+  const user = useAuthStore(s => s.user)
+  const { data: schedule, isLoading: scheduleLoading } = useCheckinSchedule()
+  const { data: capsules } = useCapsules()
+  const { data: beneficiaries } = useBeneficiaries()
+  const { data: activity } = useAuditLogs(1)
+
+  const displayName = user?.full_name?.split(' ')[0] || user?.email?.split('@')[0] || 'there'
+  const vaultStatus = deriveVaultStatus(schedule)
+  const recentActivity: ActivityEntry[] = Array.isArray(activity) ? activity.slice(0, 3) : []
 
   return (
     <div className="min-h-screen bg-[#F0F2F5] p-4">
       <div className="max-w-4xl mx-auto">
-        {/* Header */}
         <div className="mb-8">
-          <h1 className="text-4xl font-bold text-[#0D1117] mb-2">
-            Hello, John
-          </h1>
-          <p className="text-[#6B7280]">
-            Your digital legacy is secured and up to date.
-          </p>
+          <h1 className="text-4xl font-bold text-[#0D1117] mb-2">Hello, {displayName}</h1>
+          <p className="text-[#6B7280]">Your digital legacy is secured and up to date.</p>
         </div>
 
         {/* Vault Status Card */}
@@ -22,25 +42,34 @@ export default function Dashboard() {
           <div className="flex items-start justify-between mb-6">
             <div>
               <div className="flex items-center gap-2 mb-4">
-                <div className="w-3 h-3 bg-[#22C55E] rounded-full"></div>
-                <span className="font-semibold text-[#0D1117]">VAULT STATUS: ACTIVE</span>
+                <div className={`w-3 h-3 ${vaultStatus.color} rounded-full`} />
+                <span className="font-semibold text-[#0D1117]">{vaultStatus.label}</span>
               </div>
-              <p className="text-[#6B7280] text-sm mb-4">
-                Your vault is active and protected
-              </p>
+              <p className="text-[#6B7280] text-sm mb-4">Your vault is active and protected</p>
             </div>
             <Lock className="w-8 h-8 text-[#3D4F6B]" />
           </div>
 
-          {/* Status Grid */}
           <div className="grid grid-cols-2 gap-4">
             <div className="bg-slate-50 rounded-lg p-4">
               <p className="text-[#6B7280] text-xs font-medium mb-1">LAST CHECK-IN</p>
-              <p className="text-lg font-bold text-[#0D1117]">Today</p>
+              {scheduleLoading ? (
+                <div className="h-6 bg-gray-200 rounded animate-pulse" />
+              ) : (
+                <p className="text-lg font-bold text-[#0D1117]">
+                  {schedule?.last_confirmed_at ? formatRelativeTime(schedule.last_confirmed_at) : 'Never'}
+                </p>
+              )}
             </div>
             <div className="bg-slate-50 rounded-lg p-4">
               <p className="text-[#6B7280] text-xs font-medium mb-1">NEXT CHECK-IN</p>
-              <p className="text-lg font-bold text-[#0D1117]">Apr 7, 2026</p>
+              {scheduleLoading ? (
+                <div className="h-6 bg-gray-200 rounded animate-pulse" />
+              ) : (
+                <p className="text-lg font-bold text-[#0D1117]">
+                  {schedule?.next_dispatch_at ? formatDate(schedule.next_dispatch_at) : '—'}
+                </p>
+              )}
             </div>
           </div>
         </div>
@@ -56,7 +85,6 @@ export default function Dashboard() {
 
         {/* Quick Links Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-          {/* My Capsules */}
           <div
             onClick={() => navigate('/vault/capsules')}
             className="bg-white rounded-2xl shadow-md p-6 cursor-pointer hover:shadow-lg transition-shadow"
@@ -64,13 +92,12 @@ export default function Dashboard() {
             <div className="flex items-start justify-between mb-4">
               <div>
                 <h3 className="font-semibold text-[#0D1117] mb-1">My Capsules</h3>
-                <p className="text-sm text-[#6B7280]">3 secured vaults</p>
+                <p className="text-sm text-[#6B7280]">{capsules?.length ?? 0} secured {capsules?.length === 1 ? 'vault' : 'vaults'}</p>
               </div>
               <Eye className="w-5 h-5 text-[#3D4F6B]" />
             </div>
           </div>
 
-          {/* Beneficiaries */}
           <div
             onClick={() => navigate('/people')}
             className="bg-white rounded-2xl shadow-md p-6 cursor-pointer hover:shadow-lg transition-shadow"
@@ -78,7 +105,7 @@ export default function Dashboard() {
             <div className="flex items-start justify-between mb-4">
               <div>
                 <h3 className="font-semibold text-[#0D1117] mb-1">Beneficiaries</h3>
-                <p className="text-sm text-[#6B7280]">2 people managed</p>
+                <p className="text-sm text-[#6B7280]">{beneficiaries?.length ?? 0} {beneficiaries?.length === 1 ? 'person' : 'people'} managed</p>
               </div>
               <Users className="w-5 h-5 text-[#3D4F6B]" />
             </div>
@@ -87,25 +114,17 @@ export default function Dashboard() {
 
         {/* Security & Activity */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Security */}
-          <div
-            onClick={() => navigate('/security')}
-            className="bg-white rounded-2xl shadow-md p-6 cursor-pointer hover:shadow-lg transition-shadow"
-          >
+          <div onClick={() => navigate('/security')} className="bg-white rounded-2xl shadow-md p-6 cursor-pointer hover:shadow-lg transition-shadow">
             <div className="flex items-start justify-between mb-4">
               <div>
                 <h3 className="font-semibold text-[#0D1117] mb-1">Security</h3>
-                <p className="text-sm text-[#6B7280]">2FA Enabled</p>
+                <p className="text-sm text-[#6B7280]">End-to-End Encrypted</p>
               </div>
               <Shield className="w-5 h-5 text-[#3D4F6B]" />
             </div>
           </div>
 
-          {/* Activity */}
-          <div
-            onClick={() => navigate('/activity')}
-            className="bg-white rounded-2xl shadow-md p-6 cursor-pointer hover:shadow-lg transition-shadow"
-          >
+          <div onClick={() => navigate('/activity')} className="bg-white rounded-2xl shadow-md p-6 cursor-pointer hover:shadow-lg transition-shadow">
             <div className="flex items-start justify-between mb-4">
               <div>
                 <h3 className="font-semibold text-[#0D1117] mb-1">Activity</h3>
@@ -120,45 +139,28 @@ export default function Dashboard() {
         <div className="bg-white rounded-2xl shadow-md p-6 mt-8">
           <div className="flex items-center justify-between mb-6">
             <h3 className="font-semibold text-[#0D1117]">Recent Activity</h3>
-            <a href="#" className="text-sm text-[#3D4F6B] hover:text-[#2a3851] font-medium">
+            <button onClick={() => navigate('/activity')} className="text-sm text-[#3D4F6B] hover:text-[#2a3851] font-medium">
               VIEW ALL
-            </a>
+            </button>
           </div>
 
-          <div className="space-y-4">
-            {/* Activity Item 1 */}
-            <div className="flex items-center gap-4 pb-4 border-b border-gray-200">
-              <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
-                <Lock className="w-5 h-5 text-[#3D4F6B]" />
-              </div>
-              <div className="flex-1">
-                <p className="font-medium text-[#0D1117]">Check-in Confirmed</p>
-                <p className="text-sm text-[#6B7280]">Today at 2:45 PM</p>
-              </div>
+          {recentActivity.length === 0 ? (
+            <p className="text-sm text-[#6B7280] text-center py-4">No activity yet</p>
+          ) : (
+            <div className="space-y-4">
+              {recentActivity.map((item, idx) => (
+                <div key={item.id} className={`flex items-center gap-4 ${idx < recentActivity.length - 1 ? 'pb-4 border-b border-gray-100' : ''}`}>
+                  <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+                    <Lock className="w-5 h-5 text-[#3D4F6B]" />
+                  </div>
+                  <div className="flex-1">
+                    <p className="font-medium text-[#0D1117]">{getEventLabel(item.event_type)}</p>
+                    <p className="text-sm text-[#6B7280]">{formatRelativeTime(item.created_at)}</p>
+                  </div>
+                </div>
+              ))}
             </div>
-
-            {/* Activity Item 2 */}
-            <div className="flex items-center gap-4 pb-4 border-b border-gray-200">
-              <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
-                <Plus className="w-5 h-5 text-[#22C55E]" />
-              </div>
-              <div className="flex-1">
-                <p className="font-medium text-[#0D1117]">Capsule Created</p>
-                <p className="text-sm text-[#6B7280]">Yesterday at 10:20 AM</p>
-              </div>
-            </div>
-
-            {/* Activity Item 3 */}
-            <div className="flex items-center gap-4">
-              <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
-                <Users className="w-5 h-5 text-purple-600" />
-              </div>
-              <div className="flex-1">
-                <p className="font-medium text-[#0D1117]">Beneficiary Added</p>
-                <p className="text-sm text-[#6B7280]">2 days ago</p>
-              </div>
-            </div>
-          </div>
+          )}
         </div>
       </div>
     </div>
