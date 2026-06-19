@@ -15,8 +15,12 @@ from app.db.models.user import EncryptionKey
 from app.dependencies import get_current_user, get_current_verified_user
 from app.schemas.auth import (
     SignupRequest, LoginRequest, TokenResponse,
-    VerifyEmailRequest, RefreshRequest,
+    VerifyEmailRequest, RefreshRequest, ResendOtpRequest,
     EncryptionKeyResponse, DeliveryWrappingKeyResponse,
+    SetPrimaryKeyRequest, SetRecoveryKeyRequest,
+    RecoveryKeyResponse, ValidateRecoveryPhraseRequest,
+    ForgotPasswordRequest, ResetPasswordRequest,
+    ResetPasswordDataLossRequest, ChangePasswordRequest,
 )
 from app.schemas.user import UserResponse
 from app.services.auth_service import AuthService
@@ -38,6 +42,7 @@ async def signup(body: SignupRequest, db: AsyncSession = Depends(get_db_session)
         encrypted_cek=body.encrypted_cek,
         cek_iv=body.cek_iv,
         pbkdf2_salt=body.pbkdf2_salt,
+        full_name=body.full_name,
         delivery_encrypted_cek=body.delivery_encrypted_cek,
         delivery_cek_iv=body.delivery_cek_iv,
     )
@@ -48,6 +53,12 @@ async def signup(body: SignupRequest, db: AsyncSession = Depends(get_db_session)
 async def verify_email(body: VerifyEmailRequest, db: AsyncSession = Depends(get_db_session)):
     svc = AuthService(db)
     return await svc.verify_email(body.email, body.otp)
+
+
+@router.post("/resend-otp", status_code=status.HTTP_200_OK)
+async def resend_otp(body: ResendOtpRequest, db: AsyncSession = Depends(get_db_session)):
+    svc = AuthService(db)
+    return await svc.resend_otp(body.email)
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -130,3 +141,122 @@ async def update_delivery_key(
     key.updated_at = datetime.now(timezone.utc)
     await db.commit()
     return {"status": "updated"}
+
+
+@router.patch("/me/encryption-key/primary", status_code=200)
+async def update_primary_key(
+    body: SetPrimaryKeyRequest,
+    db: AsyncSession = Depends(get_db_session),
+    current_user=Depends(get_current_verified_user),
+):
+    """Re-wrap the primary CEK blob with a new password-derived key.
+
+    Used by the /recover flow (T4.4) and password reset/change (T6), after
+    the client has unwrapped the CEK via the old password or the recovery
+    phrase and re-wrapped it with the new password.
+    """
+    result = await db.execute(select(EncryptionKey).where(EncryptionKey.user_id == current_user.id))
+    key = result.scalar_one_or_none()
+    if not key:
+        raise HTTPException(status_code=404, detail="Encryption key not found")
+    key.encrypted_cek = base64.b64decode(body.encrypted_cek)
+    key.cek_iv = base64.b64decode(body.cek_iv)
+    key.pbkdf2_salt = base64.b64decode(body.pbkdf2_salt)
+    key.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"status": "updated"}
+
+
+@router.patch("/me/recovery-key", status_code=200)
+async def set_recovery_key(
+    body: SetRecoveryKeyRequest,
+    db: AsyncSession = Depends(get_db_session),
+    current_user=Depends(get_current_verified_user),
+):
+    """Set or regenerate the recovery-phrase-wrapped CEK blob (T4.3/T4.5)."""
+    result = await db.execute(select(EncryptionKey).where(EncryptionKey.user_id == current_user.id))
+    key = result.scalar_one_or_none()
+    if not key:
+        raise HTTPException(status_code=404, detail="Encryption key not found")
+    key.recovery_encrypted_cek = base64.b64decode(body.recovery_encrypted_cek)
+    key.recovery_cek_iv = base64.b64decode(body.recovery_cek_iv)
+    key.recovery_salt = base64.b64decode(body.recovery_salt)
+    key.recovery_phrase_hash = body.recovery_phrase_hash
+    key.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"status": "updated"}
+
+
+@router.post("/me/recovery-key/validate", response_model=RecoveryKeyResponse)
+async def validate_recovery_phrase(
+    body: ValidateRecoveryPhraseRequest,
+    db: AsyncSession = Depends(get_db_session),
+    current_user=Depends(get_current_verified_user),
+):
+    """Validate a recovery phrase against the stored hash and, if it
+    matches, return the recovery-wrapped CEK blob so the client can unwrap
+    it (T4.4)."""
+    result = await db.execute(select(EncryptionKey).where(EncryptionKey.user_id == current_user.id))
+    key = result.scalar_one_or_none()
+    if not key or not key.recovery_phrase_hash or not key.recovery_encrypted_cek:
+        raise HTTPException(status_code=400, detail="No recovery phrase is set up for this account")
+    if body.recovery_phrase_hash != key.recovery_phrase_hash:
+        raise HTTPException(status_code=400, detail="Incorrect recovery phrase")
+    return RecoveryKeyResponse(
+        recovery_encrypted_cek=base64.b64encode(key.recovery_encrypted_cek).decode(),
+        recovery_cek_iv=base64.b64encode(key.recovery_cek_iv).decode(),
+        recovery_salt=base64.b64encode(key.recovery_salt).decode(),
+    )
+
+
+@router.post("/forgot-password", status_code=status.HTTP_200_OK)
+async def forgot_password(body: ForgotPasswordRequest, db: AsyncSession = Depends(get_db_session)):
+    """T6.1: send a Supabase password-reset magic link to the given email."""
+    svc = AuthService(db)
+    return await svc.forgot_password(body.email)
+
+
+@router.post("/reset-password", status_code=status.HTTP_200_OK)
+async def reset_password(
+    body: ResetPasswordRequest,
+    db: AsyncSession = Depends(get_db_session),
+    current_user=Depends(get_current_verified_user),
+):
+    """T6.1/T6.3: complete a password reset (recovery-phrase path).
+
+    Authenticated via the Supabase recovery-link access token returned to
+    the frontend's /auth/reset-password page.
+    """
+    svc = AuthService(db)
+    return await svc.reset_password(
+        current_user, body.new_password, body.encrypted_cek, body.cek_iv, body.pbkdf2_salt
+    )
+
+
+@router.post("/reset-password/data-loss", status_code=status.HTTP_200_OK)
+async def reset_password_data_loss(
+    body: ResetPasswordDataLossRequest,
+    db: AsyncSession = Depends(get_db_session),
+    current_user=Depends(get_current_verified_user),
+):
+    """T6.3: complete a password reset for accounts with no recovery blob.
+    Replaces the CEK entirely and flags existing capsule content as
+    unrecoverable."""
+    svc = AuthService(db)
+    return await svc.reset_password_data_loss(
+        current_user, body.new_password, body.encrypted_cek, body.cek_iv, body.pbkdf2_salt
+    )
+
+
+@router.post("/change-password", status_code=status.HTTP_200_OK)
+async def change_password(
+    body: ChangePasswordRequest,
+    db: AsyncSession = Depends(get_db_session),
+    current_user=Depends(get_current_verified_user),
+):
+    """T6.4: logged-in password change (Security page)."""
+    svc = AuthService(db)
+    return await svc.change_password(
+        current_user, body.current_password, body.new_password,
+        body.encrypted_cek, body.cek_iv, body.pbkdf2_salt,
+    )

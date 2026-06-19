@@ -16,6 +16,10 @@ export interface Capsule {
   cipher_iv: string
   storage_object_path: string | null
   status: 'draft' | 'active' | 'pending_deletion' | 'deleted' | 'delivered'
+  delivery_order: number
+  has_recipients: boolean
+  content_unrecoverable: boolean
+  content_size_bytes: number | null
   created_at: string
   updated_at: string
 }
@@ -39,6 +43,12 @@ export interface CheckinSchedule {
   last_confirmed_at: string | null
   snooze_count: number
   snooze_limit: number
+}
+
+export interface StorageUsage {
+  total_bytes: number
+  limit_bytes: number
+  by_capsule: { capsule_id: string; title: string; bytes: number }[]
 }
 
 export interface ActivityEntry {

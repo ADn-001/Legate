@@ -22,8 +22,8 @@ class DeliveryEvent(Base):
     __tablename__ = "delivery_events"
 
     id: MappedColumn[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
-    release_trigger_id: MappedColumn[uuid.UUID] = mapped_column(ForeignKey("release_triggers.id"), index=True)
-    capsule_recipient_id: MappedColumn[uuid.UUID] = mapped_column(ForeignKey("capsule_recipients.id"))
+    release_trigger_id: MappedColumn[uuid.UUID] = mapped_column(ForeignKey("release_triggers.id", ondelete="CASCADE"), index=True)
+    capsule_recipient_id: MappedColumn[uuid.UUID] = mapped_column(ForeignKey("capsule_recipients.id", ondelete="CASCADE"))
     sent_at: MappedColumn[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     delivery_status: MappedColumn[DeliveryStatus] = mapped_column(SAEnum(DeliveryStatus), default=DeliveryStatus.pending)
     resend_message_id: MappedColumn[str | None] = mapped_column(String(255), nullable=True)

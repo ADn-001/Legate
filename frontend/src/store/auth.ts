@@ -13,10 +13,12 @@ interface AuthState {
   accessToken: string | null
   isAuthenticated: boolean
   needsOnboarding: boolean
-  login: (user: User, accessToken: string, refreshToken: string) => void
-  logout: () => void
+  bootstrapped: boolean
+  setTokens: (accessToken: string, refreshToken: string) => void
   setUser: (user: User) => void
   setNeedsOnboarding: (val: boolean) => void
+  setBootstrapped: (val: boolean) => void
+  clear: () => void
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
@@ -24,14 +26,16 @@ export const useAuthStore = create<AuthState>((set) => ({
   accessToken: null,
   isAuthenticated: false,
   needsOnboarding: false,
-  login: (user, accessToken, refreshToken) => {
+  bootstrapped: false,
+  setTokens: (accessToken, refreshToken) => {
     localStorage.setItem('refresh_token', refreshToken)
-    set({ user, accessToken, isAuthenticated: true })
-  },
-  logout: () => {
-    localStorage.removeItem('refresh_token')
-    set({ user: null, accessToken: null, isAuthenticated: false, needsOnboarding: false })
+    set({ accessToken, isAuthenticated: true })
   },
   setUser: (user) => set({ user }),
   setNeedsOnboarding: (val) => set({ needsOnboarding: val }),
+  setBootstrapped: (val) => set({ bootstrapped: val }),
+  clear: () => {
+    localStorage.removeItem('refresh_token')
+    set({ user: null, accessToken: null, isAuthenticated: false, needsOnboarding: false })
+  },
 }))

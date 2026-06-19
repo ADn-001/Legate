@@ -1,23 +1,23 @@
-version: "3.9"
-
 services:
   nginx:
-    image: nginx:alpine
+    build:
+      context: ./frontend
+      args:
+        VITE_API_BASE_URL: /api
     ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx.conf:/etc/nginx/conf.d/default.conf
+      - "${NGINX_PORT:-80}:80"
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     restart: unless-stopped
 
   api:
     build: ./backend
+    env_file: .env
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql://postgres:postgres@localhost:5432/legate
+      - DATABASE_URL=${DATABASE_URL}
       - REDIS_URL=redis://redis:6379/0
       - SUPABASE_URL=${SUPABASE_URL}
       - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
@@ -28,15 +28,32 @@ services:
       - SECRET_KEY=${SECRET_KEY}
       - DELIVERY_SECRET=${DELIVERY_SECRET}
       - BASE_URL=${BASE_URL:-http://localhost:8000}
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - PBKDF2_ITERATIONS=${PBKDF2_ITERATIONS:-100000}
+      - CORS_ORIGINS=${CORS_ORIGINS:-}
+      - ROOT_PATH=/api
+      - SUPABASE_STORAGE_BUCKET_CONTENT=${SUPABASE_STORAGE_BUCKET_CONTENT:-capsule-content}
+      - SUPABASE_STORAGE_BUCKET_MEDIA=${SUPABASE_STORAGE_BUCKET_MEDIA:-media-attachments}
+      - SUPABASE_STORAGE_BUCKET_THUMBNAILS=${SUPABASE_STORAGE_BUCKET_THUMBNAILS:-thumbnails}
+      - STORAGE_QUOTA_BYTES=${STORAGE_QUOTA_BYTES:-1073741824}
+      - ALERT_EMAIL=${ALERT_EMAIL:-}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
     restart: unless-stopped
 
   worker:
     build: ./backend
     command: celery -A app.worker.celery_app worker --loglevel=info
+    env_file: .env
     environment:
-      - DATABASE_URL=postgresql://postgres:postgres@localhost:5432/legate
+      - DATABASE_URL=${DATABASE_URL}
       - REDIS_URL=redis://redis:6379/0
       - SUPABASE_URL=${SUPABASE_URL}
       - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
@@ -47,15 +64,26 @@ services:
       - SECRET_KEY=${SECRET_KEY}
       - DELIVERY_SECRET=${DELIVERY_SECRET}
       - BASE_URL=${BASE_URL:-http://localhost:8000}
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - PBKDF2_ITERATIONS=${PBKDF2_ITERATIONS:-100000}
+      - CORS_ORIGINS=${CORS_ORIGINS:-}
+      - ROOT_PATH=${ROOT_PATH:-}
+      - SUPABASE_STORAGE_BUCKET_CONTENT=${SUPABASE_STORAGE_BUCKET_CONTENT:-capsule-content}
+      - SUPABASE_STORAGE_BUCKET_MEDIA=${SUPABASE_STORAGE_BUCKET_MEDIA:-media-attachments}
+      - SUPABASE_STORAGE_BUCKET_THUMBNAILS=${SUPABASE_STORAGE_BUCKET_THUMBNAILS:-thumbnails}
+      - STORAGE_QUOTA_BYTES=${STORAGE_QUOTA_BYTES:-1073741824}
+      - ALERT_EMAIL=${ALERT_EMAIL:-}
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
     restart: unless-stopped
 
   beat:
     build: ./backend
     command: celery -A app.worker.celery_app beat --loglevel=info
+    env_file: .env
     environment:
-      - DATABASE_URL=postgresql://postgres:postgres@localhost:5432/legate
+      - DATABASE_URL=${DATABASE_URL}
       - REDIS_URL=redis://redis:6379/0
       - SUPABASE_URL=${SUPABASE_URL}
       - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
@@ -66,12 +94,27 @@ services:
       - SECRET_KEY=${SECRET_KEY}
       - DELIVERY_SECRET=${DELIVERY_SECRET}
       - BASE_URL=${BASE_URL:-http://localhost:8000}
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - PBKDF2_ITERATIONS=${PBKDF2_ITERATIONS:-100000}
+      - CORS_ORIGINS=${CORS_ORIGINS:-}
+      - ROOT_PATH=${ROOT_PATH:-}
+      - SUPABASE_STORAGE_BUCKET_CONTENT=${SUPABASE_STORAGE_BUCKET_CONTENT:-capsule-content}
+      - SUPABASE_STORAGE_BUCKET_MEDIA=${SUPABASE_STORAGE_BUCKET_MEDIA:-media-attachments}
+      - SUPABASE_STORAGE_BUCKET_THUMBNAILS=${SUPABASE_STORAGE_BUCKET_THUMBNAILS:-thumbnails}
+      - STORAGE_QUOTA_BYTES=${STORAGE_QUOTA_BYTES:-1073741824}
+      - ALERT_EMAIL=${ALERT_EMAIL:-}
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
     restart: unless-stopped
 
   redis:
     image: redis:7-alpine
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
     restart: unless-stopped

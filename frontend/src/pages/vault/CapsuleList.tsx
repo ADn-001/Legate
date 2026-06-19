@@ -63,6 +63,7 @@ export default function CapsuleList() {
                 key={capsule.id}
                 capsule={capsule}
                 beneficiaryName={getBeneficiaryName(capsule.beneficiary_id)}
+                onView={() => navigate(`/vault/capsules/${capsule.id}/view`)}
                 onEdit={() => navigate(`/vault/capsules/${capsule.id}`)}
                 onDelete={() => setDeleteTarget(capsule)}
               />

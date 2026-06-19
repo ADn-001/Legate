@@ -1,14 +1,19 @@
-version: "3.9"
-
+# Development override. Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
 services:
   api:
-    build: ./backend
+    volumes:
+      - ./backend:/app
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
 
   worker:
-    build: ./backend
+    volumes:
+      - ./backend:/app
 
   beat:
-    build: ./backend
+    volumes:
+      - ./backend:/app
 
   redis:
-    image: redis:7-alpine
+    ports:
+      - "6379:6379"

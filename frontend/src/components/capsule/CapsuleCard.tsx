@@ -1,15 +1,16 @@
-import { Lock, Edit2, Trash2 } from 'lucide-react'
+import { Lock, Eye, Edit2, Trash2, AlertTriangle } from 'lucide-react'
 import Badge from '../ui/Badge'
 import { Capsule } from '../../types/api'
 
 interface CapsuleCardProps {
   capsule: Capsule
   beneficiaryName?: string
+  onView: () => void
   onEdit: () => void
   onDelete: () => void
 }
 
-const statusBadgeVariant = (status: Capsule['status']) => {
+export const statusBadgeVariant = (status: Capsule['status']) => {
   switch (status) {
     case 'active': return 'success' as const
     case 'draft': return 'default' as const
@@ -20,7 +21,7 @@ const statusBadgeVariant = (status: Capsule['status']) => {
   }
 }
 
-const statusLabel = (status: Capsule['status']) => {
+export const statusLabel = (status: Capsule['status']) => {
   switch (status) {
     case 'active': return 'Active'
     case 'draft': return 'Draft'
@@ -31,7 +32,7 @@ const statusLabel = (status: Capsule['status']) => {
   }
 }
 
-export default function CapsuleCard({ capsule, beneficiaryName, onEdit, onDelete }: CapsuleCardProps) {
+export default function CapsuleCard({ capsule, beneficiaryName, onView, onEdit, onDelete }: CapsuleCardProps) {
   return (
     <div className="bg-white rounded-2xl shadow-md p-6 hover:shadow-lg transition-shadow">
       <div className="flex items-start justify-between gap-4">
@@ -43,11 +44,32 @@ export default function CapsuleCard({ capsule, beneficiaryName, onEdit, onDelete
           {beneficiaryName && (
             <p className="text-sm text-[#6B7280] mb-3">To: {beneficiaryName}</p>
           )}
-          <Badge variant={statusBadgeVariant(capsule.status)}>
-            {statusLabel(capsule.status)}
-          </Badge>
+          <div className="flex items-center gap-2 flex-wrap">
+            <Badge variant={statusBadgeVariant(capsule.status)}>
+              {statusLabel(capsule.status)}
+            </Badge>
+            {!capsule.has_recipients && (
+              <Badge variant="warning" className="inline-flex items-center gap-1">
+                <AlertTriangle className="w-3 h-3" />
+                No recipient assigned
+              </Badge>
+            )}
+            {capsule.content_unrecoverable && (
+              <Badge variant="error" className="inline-flex items-center gap-1">
+                <AlertTriangle className="w-3 h-3" />
+                Content unrecoverable
+              </Badge>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
+          <button
+            onClick={onView}
+            className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+            aria-label="View capsule"
+          >
+            <Eye className="w-5 h-5 text-[#3D4F6B]" />
+          </button>
           <button
             onClick={onEdit}
             className="p-2 hover:bg-gray-100 rounded-lg transition-colors"

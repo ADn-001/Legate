@@ -34,6 +34,10 @@ celery_app.conf.update(
             "task": "app.worker.tasks.checkin_tasks.check_grace_periods",
             "schedule": 3600.0,
         },
+        "process-pending-triggers": {
+            "task": "app.worker.tasks.checkin_tasks.process_pending_triggers",
+            "schedule": 3600.0,
+        },
         "send-grace-reminders": {
             "task": "app.worker.tasks.checkin_tasks.send_grace_period_reminders",
             "schedule": 43200.0,  # Every 12h

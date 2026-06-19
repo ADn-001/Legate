@@ -5,10 +5,10 @@ from datetime import datetime, timezone
 
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, update as sa_update
 
 from app.core.audit import write_audit
-from app.core.email import send_nomination_email
+from app.core.email import send_nomination_email, send_beneficiary_removal_email
 from app.db.models.beneficiary import Beneficiary, BeneficiaryStatus
 from app.db.models.capsule import CapsuleRecipient
 
@@ -66,10 +66,15 @@ class BeneficiaryService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Beneficiary not found")
         return beneficiary
 
-    async def list_for_user(self, user_id: uuid.UUID) -> list[Beneficiary]:
-        result = await self.db.execute(
-            select(Beneficiary).where(Beneficiary.user_id == user_id)
-        )
+    async def list_for_user(
+        self, user_id: uuid.UUID, include_removed: bool = False
+    ) -> list[Beneficiary]:
+        # FR-22: removed beneficiaries are excluded by default so they never
+        # appear in frontend dropdowns / the emergency-contact picker.
+        query = select(Beneficiary).where(Beneficiary.user_id == user_id)
+        if not include_removed:
+            query = query.where(Beneficiary.status != BeneficiaryStatus.removed)
+        result = await self.db.execute(query)
         return list(result.scalars().all())
 
     async def update(
@@ -98,6 +103,16 @@ class BeneficiaryService:
             except Exception:
                 pass
 
+        # F11/FR-23: only one beneficiary can be the emergency contact at a
+        # time. Clear the flag on every other beneficiary in the same
+        # transaction so it's never possible to end up with two.
+        if kwargs.get("is_emergency_contact") is True:
+            await self.db.execute(
+                sa_update(Beneficiary)
+                .where(and_(Beneficiary.user_id == user_id, Beneficiary.id != beneficiary_id))
+                .values(is_emergency_contact=False)
+            )
+
         await write_audit(self.db, "beneficiary_updated", user_id=user_id, resource_id=beneficiary_id)
         await self.db.commit()
         return beneficiary
@@ -113,6 +128,13 @@ class BeneficiaryService:
         )
         for recipient in result.scalars().all():
             await self.db.delete(recipient)
+
+        # FR-22: notify the beneficiary — neutral copy, no account/content
+        # details (mirrors FR-20 constraints). Failure must not block removal.
+        try:
+            send_beneficiary_removal_email(to=beneficiary.email, beneficiary_name=beneficiary.full_name)
+        except Exception:
+            pass
 
         await write_audit(self.db, "beneficiary_removed", user_id=user_id, resource_id=beneficiary_id)
         await self.db.commit()

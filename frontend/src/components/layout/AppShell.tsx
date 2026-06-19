@@ -1,6 +1,7 @@
 import { useLocation } from 'react-router-dom'
 import TopBar from './TopBar'
 import BottomNav from './BottomNav'
+import UnlockModal from '../auth/UnlockModal'
 
 const hideNavPaths = ['/auth/', '/setup/', '/checkin/', '/emergency/']
 
@@ -16,6 +17,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         {children}
       </main>
       {!hideNav && <BottomNav />}
+      <UnlockModal />
     </div>
   )
 }

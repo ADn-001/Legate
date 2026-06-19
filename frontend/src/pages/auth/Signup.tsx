@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { Shield } from 'lucide-react'
 import { authApi } from '../../api/auth'
 import { keysModule, toBase64 } from '../../crypto/keys'
+import { usePendingAuthStore } from '../../store/pendingAuth'
 
 export default function Signup() {
   const navigate = useNavigate()
@@ -31,6 +32,7 @@ export default function Signup() {
       await authApi.signup({
         email,
         password,
+        full_name: fullName.trim() || null,
         encrypted_cek: toBase64(encryptedCek),
         cek_iv: toBase64(cekIv),
         pbkdf2_salt: toBase64(salt),
@@ -38,12 +40,11 @@ export default function Signup() {
         delivery_cek_iv: null,
       })
 
-      sessionStorage.setItem('pending_signup', JSON.stringify({
-        email,
-        password_hint: btoa(password),
-      }))
+      // T3: hold the password in memory only (never sessionStorage/localStorage)
+      // so VerifyEmail can derive the wrapping key and wrap the CEK.
+      usePendingAuthStore.getState().set(email, password)
 
-      navigate('/auth/verify-email', { state: { email } })
+      navigate(`/auth/verify-email?email=${encodeURIComponent(email)}`, { state: { email } })
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Signup failed'
       setError(msg)

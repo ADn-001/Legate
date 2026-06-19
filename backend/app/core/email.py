@@ -1,9 +1,20 @@
 """
 Email sending utilities via Resend SDK.
+
+All user-supplied strings (names, titles, content) MUST be passed through
+html.escape() before interpolation (S3 hardening lands in Phase 5; escaping
+is mandatory now per Phase 2 T9.4).
 """
+
+import html as html_mod
+from datetime import datetime
 
 import resend
 from app.config import get_settings
+
+
+def _esc(value: str | None) -> str:
+    return html_mod.escape(value or "", quote=True)
 
 
 def _get_resend():
@@ -62,6 +73,7 @@ def send_checkin_email(
 def send_nomination_email(to: str, nominator_name: str) -> str:
     r = _get_resend()
     cfg = get_settings()
+    nominator_name = _esc(nominator_name)
     html = f"""<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="UTF-8"><title>You&rsquo;ve been added as a Legate beneficiary</title>
@@ -97,8 +109,12 @@ def send_delivery_email(
     capsules_html: str,
     nominator_name: str = "someone",
 ) -> str:
+    """One email per beneficiary (FR-39). capsules_html is pre-rendered and
+    pre-escaped by the delivery task; names are escaped here."""
     r = _get_resend()
     cfg = get_settings()
+    beneficiary_name = _esc(beneficiary_name)
+    nominator_name = _esc(nominator_name)
     html = f"""<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="UTF-8"><title>A message for you</title>
@@ -163,6 +179,117 @@ def send_grace_period_reminder(to: str, days_remaining: int, confirm_url: str) -
         "from": cfg.email_from,
         "to": [to],
         "subject": f"Legate: action required — {days_remaining} days remaining",
+        "html": html,
+    })
+    return data.get("id", "")
+
+
+def send_emergency_pause_email(
+    to: str,
+    contact_name: str,
+    user_name: str,
+    pause_url: str,
+    deadline: datetime,
+) -> str:
+    """
+    FR-23/24: notify the emergency contact that delivery is about to proceed,
+    with a single-click pause link valid until the 48h deadline.
+    Plain-language, non-alarming tone per FR-40.
+    """
+    r = _get_resend()
+    cfg = get_settings()
+    contact_name = _esc(contact_name)
+    user_name = _esc(user_name)
+    deadline_str = deadline.strftime("%A, %B %d, %Y at %H:%M UTC")
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Legate needs your help</title>
+<style>
+  body{{font-family:sans-serif;max-width:600px;margin:0 auto;padding:32px 16px;color:#1a1a1a}}
+  .notice{{background:#fff3e0;border-left:4px solid #e65100;padding:16px;margin-bottom:24px;border-radius:0 6px 6px 0}}
+  .btn{{display:inline-block;padding:14px 28px;background:#e65100;color:#fff!important;text-decoration:none;border-radius:6px;font-size:16px;font-weight:600;margin:16px 0}}
+  .footer{{margin-top:32px;font-size:12px;color:#999;border-top:1px solid #eee;padding-top:16px}}
+</style>
+</head>
+<body>
+  <h2>Hello {contact_name},</h2>
+  <p><strong>{user_name}</strong> named you as their emergency contact on Legate, a service that stores personal messages to be delivered to loved ones if something happens to them.</p>
+  <div class="notice">
+    <p>{user_name} has not responded to their regular check-in messages. If we don&rsquo;t hear anything, their stored messages will be delivered to their chosen recipients after <strong>{deadline_str}</strong>.</p>
+  </div>
+  <p>If you know that {user_name} is okay &mdash; for example, they are travelling, unwell but recovering, or simply unable to reach their email &mdash; you can pause this delivery for 7 days with one click:</p>
+  <a class="btn" href="{pause_url}">Pause delivery for 7 days</a>
+  <p>If you believe the delivery should proceed, no action is needed.</p>
+  <div class="footer">
+    <p>This link can be used once and expires at the deadline above. If you weren&rsquo;t expecting this email, you can safely ignore it.</p>
+    <p>Legate &mdash; your digital estate, in good hands.</p>
+  </div>
+</body>
+</html>"""
+
+    data = r.Emails.send({
+        "from": cfg.email_from,
+        "to": [to],
+        "subject": f"Legate: {user_name} hasn't checked in — you can pause delivery",
+        "html": html,
+    })
+    return data.get("id", "")
+
+
+def send_beneficiary_removal_email(to: str, beneficiary_name: str) -> str:
+    """
+    FR-22: neutral removal notification. Mirrors FR-20 constraints — no
+    account details, no content details, no reason given.
+    """
+    r = _get_resend()
+    cfg = get_settings()
+    beneficiary_name = _esc(beneficiary_name)
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Legate beneficiary update</title>
+<style>
+  body{{font-family:sans-serif;max-width:600px;margin:0 auto;padding:32px 16px;color:#1a1a1a}}
+  .footer{{margin-top:32px;font-size:12px;color:#999;border-top:1px solid #eee;padding-top:16px}}
+</style>
+</head>
+<body>
+  <h2>Legate beneficiary update</h2>
+  <p>Dear {beneficiary_name},</p>
+  <p>You are no longer listed as a beneficiary on a Legate account. No action is required on your part.</p>
+  <p>If you have questions, please reach out to the person who originally added you.</p>
+  <div class="footer">
+    <p>Legate &mdash; your digital estate, in good hands.</p>
+  </div>
+</body>
+</html>"""
+
+    data = r.Emails.send({
+        "from": cfg.email_from,
+        "to": [to],
+        "subject": "Legate beneficiary update",
+        "html": html,
+    })
+    return data.get("id", "")
+
+
+def send_alert_email(to: str, subject: str, body_text: str) -> str:
+    """Internal operational alert (B6: permanent delivery failure)."""
+    r = _get_resend()
+    cfg = get_settings()
+    body_html = _esc(body_text).replace("\n", "<br>")
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>{_esc(subject)}</title></head>
+<body style="font-family:monospace;max-width:700px;margin:0 auto;padding:24px 16px;color:#1a1a1a">
+  <h2 style="color:#c62828">&#x1F6A8; {_esc(subject)}</h2>
+  <p>{body_html}</p>
+</body>
+</html>"""
+
+    data = r.Emails.send({
+        "from": cfg.email_from,
+        "to": [to],
+        "subject": f"[LEGATE ALERT] {subject}",
         "html": html,
     })
     return data.get("id", "")

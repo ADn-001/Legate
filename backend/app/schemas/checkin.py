@@ -1,12 +1,14 @@
 """Pydantic schemas for check-in settings endpoints."""
 
 from datetime import datetime
-from pydantic import BaseModel
+from typing import Literal
+from pydantic import BaseModel, Field
 
 
 class CheckInSettingsUpdate(BaseModel):
-    interval_days: int | None = None
-    grace_period_days: int | None = None
+    # FR-11: interval 7–365 days; FR-12: grace period one of 3/7/14/30.
+    interval_days: int | None = Field(None, ge=7, le=365)
+    grace_period_days: Literal[3, 7, 14, 30] | None = None
 
 
 class CheckInSettingsResponse(BaseModel):

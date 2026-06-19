@@ -36,6 +36,22 @@ async def test_checkin_settings_requires_auth(http: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_update_interval_out_of_bounds_returns_422(auth_client: AsyncClient):
+    """B15 / FR-11: interval must be within 7–365 days."""
+    res = await auth_client.patch("/settings/checkin", json={"interval_days": 3})
+    assert res.status_code == 422
+    res = await auth_client.patch("/settings/checkin", json={"interval_days": 400})
+    assert res.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_update_grace_invalid_value_returns_422(auth_client: AsyncClient):
+    """B15 / FR-12: grace period restricted to 3/7/14/30."""
+    res = await auth_client.patch("/settings/checkin", json={"grace_period_days": 5})
+    assert res.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_storage_usage_endpoint(auth_client: AsyncClient):
     res = await auth_client.get("/settings/storage")
     assert res.status_code == 200
@@ -43,3 +59,6 @@ async def test_storage_usage_endpoint(auth_client: AsyncClient):
     assert "total_bytes" in body
     assert "by_capsule" in body
     assert isinstance(body["by_capsule"], list)
+    # B16 / FR-36: quota for the progress bar.
+    assert "limit_bytes" in body
+    assert body["limit_bytes"] > 0

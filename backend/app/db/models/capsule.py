@@ -5,7 +5,7 @@ SQLAlchemy ORM models for capsules, capsule recipients, and media attachments.
 import uuid
 import enum
 from datetime import datetime, date
-from sqlalchemy import String, DateTime, Date, Enum as SAEnum, ForeignKey, Integer, LargeBinary, Text
+from sqlalchemy import BigInteger, Boolean, String, DateTime, Date, Enum as SAEnum, ForeignKey, Integer, LargeBinary, Text
 from sqlalchemy.orm import mapped_column, MappedColumn, relationship
 from app.db.base import Base, TimestampMixin
 
@@ -47,9 +47,14 @@ class Capsule(Base, TimestampMixin):
     storage_object_path: MappedColumn[str | None] = mapped_column(Text, nullable=True)
     cipher_iv: MappedColumn[bytes | None] = mapped_column(LargeBinary, nullable=True)
     content_hash: MappedColumn[str | None] = mapped_column(String(64), nullable=True)
+    # Size of the encrypted text-content blob, set at upload time (FR-36 quota).
+    content_size_bytes: MappedColumn[int | None] = mapped_column(BigInteger, nullable=True)
     scheduled_delivery_date: MappedColumn[date | None] = mapped_column(Date, nullable=True)
     delivery_order: MappedColumn[int] = mapped_column(Integer, default=0)
     auto_saved_at: MappedColumn[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # T6.3: set when a password-reset-with-data-loss replaced the user's CEK —
+    # this capsule's content was encrypted under the old (now-unrecoverable) CEK.
+    content_unrecoverable: MappedColumn[bool] = mapped_column(Boolean, default=False, server_default="false")
 
     user = relationship("User", back_populates="capsules")
     recipients = relationship("CapsuleRecipient", back_populates="capsule", cascade="all, delete-orphan")
@@ -61,7 +66,7 @@ class CapsuleRecipient(Base):
 
     id: MappedColumn[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     capsule_id: MappedColumn[uuid.UUID] = mapped_column(ForeignKey("capsules.id", ondelete="CASCADE"))
-    beneficiary_id: MappedColumn[uuid.UUID] = mapped_column(ForeignKey("beneficiaries.id", ondelete="RESTRICT"))
+    beneficiary_id: MappedColumn[uuid.UUID] = mapped_column(ForeignKey("beneficiaries.id", ondelete="CASCADE"))
     is_primary: MappedColumn[bool] = mapped_column(default=False)
     status: MappedColumn[RecipientStatus] = mapped_column(SAEnum(RecipientStatus), default=RecipientStatus.pending)
     delivered_at: MappedColumn[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

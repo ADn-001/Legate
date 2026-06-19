@@ -5,6 +5,7 @@ All test users prefixed with e2etest_ for easy cleanup.
 
 import asyncio
 import base64
+import os
 import uuid
 from datetime import datetime, timezone, timedelta
 
@@ -32,6 +33,24 @@ _test_engine = create_async_engine(
 )
 AsyncSessionLocal = async_sessionmaker(_test_engine, expire_on_commit=False, class_=AsyncSession)
 
+
+# ── Patch app.db.session for worker-task code paths ──────────────────────────
+# Worker task functions (checkin_tasks/delivery_tasks/cleanup_tasks) do
+# `from app.db.session import AsyncSessionLocal` and use the module-level
+# `engine`, which is built once at import time with the default pooled
+# AsyncAdaptedQueuePool + pool_pre_ping. asyncpg connections are bound to the
+# event loop active when they're created; pytest-asyncio gives each test
+# function its own loop, so a pooled connection created under one test's loop
+# raises "Future attached to a different loop" (and isn't recoverable via
+# pre_ping, since that RuntimeError isn't classified as a disconnect) when
+# reused under another test's loop. Point worker-task code at this session's
+# NullPool engine too — NullPool opens/closes a fresh connection per checkout,
+# so there is never a cross-loop reuse.
+import app.db.session as _db_session_module  # noqa: E402
+
+_db_session_module.engine = _test_engine
+_db_session_module.AsyncSessionLocal = AsyncSessionLocal
+
 _SIGNUP_CEK = "dGVzdGNlaw=="
 _SIGNUP_IV = "dGVzdGl2AA=="
 _SIGNUP_SALT = "dGVzdHNhbHQ="
@@ -39,16 +58,19 @@ _SIGNUP_DCEK = "dGVzdGRlbGl2ZXJ5Y2VrAA=="
 _SIGNUP_DIV = "dGVzdGRlbGl2ZXJ5aXY="
 
 
+# Supabase validates recipient-domain deliverability at sign_up, so test
+# emails must use a REAL mailbox. Plus-addressing keeps each address unique
+# while landing in one inbox. Override with E2E_MAILBOX if needed.
+E2E_MAILBOX = os.environ.get("E2E_MAILBOX", "995homebase995@gmail.com")
+
+
 def make_test_email() -> str:
-    return f"{TEST_EMAIL_PREFIX}{uuid.uuid4().hex[:8]}@testlegate.dev"
+    local, domain = E2E_MAILBOX.split("@", 1)
+    return f"{local}+{TEST_EMAIL_PREFIX}{uuid.uuid4().hex[:8]}@{domain}"
 
 
-# ── Override parent mock fixture ─────────────────────────────────────────────
-
-@pytest.fixture(autouse=True)
-def mock_external_services():
-    """No-op: disable unit-test mocking so real services are called."""
-    pass
+# NOTE: the parent tests/conftest.py no longer mocks anything (Phase 2
+# T-test); all suites run against real services and the real test database.
 
 
 # ── Session-scoped event loop (prevents per-module event_loop conflicts) ──────

@@ -69,7 +69,11 @@ async def test_list_capsules(auth_client: AsyncClient, created_capsule):
 
 
 @pytest.mark.asyncio
-async def test_list_capsules_excludes_deleted(auth_client: AsyncClient, test_beneficiary):
+async def test_list_capsules_includes_pending_deletion_with_badge_status(
+    auth_client: AsyncClient, test_beneficiary
+):
+    """B17 / FR-31: a just-deleted capsule stays listed as pending_deletion
+    (the frontend shows a badge); only fully purged capsules disappear."""
     create = await auth_client.post("/capsules/", json={
         "title": "To Delete",
         "beneficiary_id": test_beneficiary["id"],
@@ -79,8 +83,38 @@ async def test_list_capsules_excludes_deleted(auth_client: AsyncClient, test_ben
     await auth_client.delete(f"/capsules/{cap_id}")
 
     res = await auth_client.get("/capsules/")
+    by_id = {c["id"]: c for c in res.json()}
+    assert cap_id in by_id, "B17 regression: pending_deletion capsule missing from list"
+    assert by_id[cap_id]["status"] == "pending_deletion"
+
+
+@pytest.mark.asyncio
+async def test_list_capsules_excludes_fully_deleted(auth_client: AsyncClient, test_beneficiary):
+    create = await auth_client.post("/capsules/", json={
+        "title": "Fully Deleted",
+        "beneficiary_id": test_beneficiary["id"],
+        "cipher_iv": "f" * 24,
+    })
+    cap_id = create.json()["id"]
+
+    from tests.e2e.conftest import AsyncSessionLocal
+    from app.db.models.capsule import Capsule, CapsuleStatus
+    async with AsyncSessionLocal() as db:
+        cap = await db.get(Capsule, cap_id)
+        cap.status = CapsuleStatus.deleted
+        await db.commit()
+
+    res = await auth_client.get("/capsules/")
     ids = [c["id"] for c in res.json()]
     assert cap_id not in ids
+
+
+@pytest.mark.asyncio
+async def test_list_capsules_exposes_has_recipients(auth_client: AsyncClient, created_capsule):
+    """FR-22: the list response carries the zero-recipient flag."""
+    res = await auth_client.get("/capsules/")
+    cap = next(c for c in res.json() if c["id"] == created_capsule["id"])
+    assert cap["has_recipients"] is True
 
 
 # ── Get Single ────────────────────────────────────────────────────────────────
