@@ -60,8 +60,10 @@ async def confirm_checkin(
     user_agent = request.headers.get("user-agent")
     try:
         svc = CheckInService(db)
-        await svc.confirm(token, ip, user_agent)
-        return HTMLResponse(content=_CONFIRMED_HTML.format(days=30), status_code=200)
+        result = await svc.confirm(token, ip, user_agent)
+        # B11: show the schedule's real interval, not a hardcoded 30.
+        days = result.get("interval_days") or 30
+        return HTMLResponse(content=_CONFIRMED_HTML.format(days=days), status_code=200)
     except Exception as exc:
         code = getattr(exc, "status_code", 400)
         detail = getattr(exc, "detail", str(exc))
@@ -94,7 +96,9 @@ async def emergency_pause(
     try:
         svc = CheckInService(db)
         await svc.emergency_pause(token)
-        return HTMLResponse(content=_PAUSED_HTML, status_code=200)
+        # B12: the template double-braces its CSS; .format() collapses
+        # {{ }} → { } so the browser receives valid CSS.
+        return HTMLResponse(content=_PAUSED_HTML.format(), status_code=200)
     except Exception as exc:
         code = getattr(exc, "status_code", 400)
         detail = getattr(exc, "detail", str(exc))

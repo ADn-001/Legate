@@ -10,7 +10,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db_session
 from app.dependencies import get_current_verified_user
-from app.schemas.capsule import CapsuleCreate, CapsuleUpdate, CapsuleResponse
+from app.schemas.capsule import (
+    CapsuleCreate,
+    CapsuleUpdate,
+    CapsuleResponse,
+    CapsuleContentResponse,
+    CapsuleUploadUrlResponse,
+)
 from app.services.capsule_service import CapsuleService
 
 router = APIRouter()
@@ -43,6 +49,7 @@ async def create_capsule(
         beneficiary_id=body.beneficiary_id,
         cipher_iv=body.cipher_iv,
         content_hash=body.content_hash,
+        content_size_bytes=body.content_size_bytes,
     )
     return CapsuleCreateResponse(**result)
 
@@ -66,6 +73,26 @@ async def update_capsule(
 ):
     svc = CapsuleService(db)
     return await svc.update(capsule_id, current_user.id, **body.model_dump(exclude_none=True))
+
+
+@router.get("/{capsule_id}/content", response_model=CapsuleContentResponse)
+async def get_capsule_content(
+    capsule_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db_session),
+    current_user=Depends(get_current_verified_user),
+):
+    svc = CapsuleService(db)
+    return await svc.get_content_url(capsule_id, current_user.id)
+
+
+@router.post("/{capsule_id}/content", response_model=CapsuleUploadUrlResponse)
+async def get_capsule_upload_url(
+    capsule_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db_session),
+    current_user=Depends(get_current_verified_user),
+):
+    svc = CapsuleService(db)
+    return await svc.get_upload_url(capsule_id, current_user.id)
 
 
 @router.delete("/{capsule_id}", status_code=status.HTTP_204_NO_CONTENT)

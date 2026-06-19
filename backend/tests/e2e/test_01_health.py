@@ -33,9 +33,9 @@ async def test_openapi_schema_loads(http: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_supabase_connection_via_signup_endpoint(http: AsyncClient):
-    import uuid
+    from tests.e2e.conftest import make_test_email
     res = await http.post("/auth/signup", json={
-        "email": f"conntest_{uuid.uuid4().hex[:6]}@testlegate.dev",
+        "email": make_test_email(),  # must be a deliverable domain
         "password": "TestPassword123!",
         "encrypted_cek": "dGVzdA==",
         "cek_iv": "dGVzdA==",

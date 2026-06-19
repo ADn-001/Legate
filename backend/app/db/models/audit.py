@@ -18,7 +18,7 @@ class AuditLog(Base):
     __tablename__ = "audit_logs"
 
     id: MappedColumn[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
-    user_id: MappedColumn[uuid.UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    user_id: MappedColumn[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     actor_id: MappedColumn[uuid.UUID | None] = mapped_column(nullable=True)
     event_type: MappedColumn[str] = mapped_column(String(64), nullable=False)
     resource_type: MappedColumn[str | None] = mapped_column(String(64), nullable=True)

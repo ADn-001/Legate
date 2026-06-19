@@ -25,6 +25,14 @@ export default function Beneficiaries() {
 
   const isMobile = window.innerWidth <= 768
 
+  // F11/FR-23: the beneficiary who currently holds the single emergency
+  // contact slot, if it's not the one being edited right now.
+  const currentEmergencyContact = beneficiaries?.find((b: Beneficiary) => b.is_emergency_contact)
+  const otherEmergencyContactName =
+    currentEmergencyContact && currentEmergencyContact.id !== editTarget?.id
+      ? currentEmergencyContact.full_name
+      : undefined
+
   const handleCreate = async (data: BeneficiaryCreatePayload) => {
     setFormError(null)
     try {
@@ -75,6 +83,7 @@ export default function Beneficiaries() {
         onSubmit={editTarget ? handleUpdate : handleCreate}
         onCancel={() => { setShowForm(false); setEditTarget(null) }}
         loading={createMutation.isPending || updateMutation.isPending}
+        otherEmergencyContactName={otherEmergencyContactName}
       />
     </>
   )

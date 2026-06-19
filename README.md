@@ -67,7 +67,7 @@ cp .env.example .env
 
 ```bash
 # From the project root
-docker compose -f docker-compose.dev.yml up
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up
 ```
 
 This starts: FastAPI (with hot reload on :8000), Celery worker, Celery beat, Redis.

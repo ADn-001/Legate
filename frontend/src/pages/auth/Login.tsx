@@ -1,14 +1,26 @@
 import { useNavigate } from 'react-router-dom'
 import { useState } from 'react'
+import axios from 'axios'
 import { Shield } from 'lucide-react'
 import { authApi } from '../../api/auth'
 import { keysModule, fromBase64 } from '../../crypto/keys'
 import { useAuthStore } from '../../store/auth'
 import { useCryptoStore } from '../../store/crypto'
 
+// T12 (F14): differentiate login failures so the user knows whether to
+// retry their credentials or wait for the server to come back.
+function getLoginErrorMessage(err: unknown): string {
+  if (axios.isAxiosError(err)) {
+    if (!err.response) return "Can't reach the server"
+    const status = err.response.status
+    if (status >= 500) return 'Something went wrong, try again'
+    if (status === 400 || status === 401 || status === 403) return 'Invalid email or password'
+  }
+  return 'Invalid email or password'
+}
+
 export default function Login() {
   const navigate = useNavigate()
-  const authStore = useAuthStore()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
@@ -20,8 +32,11 @@ export default function Login() {
     setError(null)
     try {
       const { data } = await authApi.login({ email, password })
+      useAuthStore.getState().setTokens(data.access_token, data.refresh_token)
+
       const { data: meData } = await authApi.getMe()
-      authStore.login(meData, data.access_token, data.refresh_token)
+      useAuthStore.getState().setUser(meData)
+      useAuthStore.getState().setNeedsOnboarding(!!meData.needs_onboarding)
 
       const keyRes = await authApi.getEncryptionKey()
       const { encrypted_cek, cek_iv, pbkdf2_salt } = keyRes.data
@@ -35,8 +50,8 @@ export default function Login() {
       } else {
         navigate('/vault')
       }
-    } catch {
-      setError('Invalid email or password')
+    } catch (err) {
+      setError(getLoginErrorMessage(err))
     } finally {
       setLoading(false)
     }
@@ -82,6 +97,15 @@ export default function Login() {
                 className="input-field w-full"
                 required
               />
+              <div className="text-right mt-2">
+                <button
+                  type="button"
+                  onClick={() => navigate('/auth/forgot-password')}
+                  className="text-sm text-[#3D4F6B] hover:text-[#2a3851]"
+                >
+                  Forgot password?
+                </button>
+              </div>
             </div>
 
             <button

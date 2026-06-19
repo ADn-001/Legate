@@ -33,9 +33,9 @@ Thumbs.db
 .coverage
 htmlcov/
 
-# Alembic
-alembic/versions/*.py
-!alembic/versions/.gitkeep
 
 # Docker
 *.log
+
+# Celery
+celerybeat-schedule*

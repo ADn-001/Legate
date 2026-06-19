@@ -7,7 +7,9 @@ TEST_PASSWORD = "TestPassword123!"
 
 
 def fresh_email():
-    return f"e2etest_{uuid.uuid4().hex[:8]}@testlegate.dev"
+    # Must be a deliverable mailbox — Supabase validates the domain at sign_up.
+    from tests.e2e.conftest import make_test_email
+    return make_test_email()
 
 
 BASE_SIGNUP = {

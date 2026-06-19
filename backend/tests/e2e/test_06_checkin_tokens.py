@@ -114,6 +114,18 @@ async def test_confirm_used_token_returns_409(http: AsyncClient, user_ids):
 
 
 @pytest.mark.asyncio
+async def test_confirm_token_single_use_second_call_409(http: AsyncClient, user_ids):
+    """T-test 3 (NFR-12 regression): redeem the SAME confirm token twice —
+    first succeeds (200), second is rejected with 409."""
+    token = await _insert_test_token(user_ids["user_id"], user_ids["schedule_id"], TokenType.confirm)
+    first = await http.get(f"/checkin/confirm?token={token}")
+    assert first.status_code == 200
+    second = await http.get(f"/checkin/confirm?token={token}")
+    assert second.status_code == 409
+    assert "text/html" in second.headers.get("content-type", "")
+
+
+@pytest.mark.asyncio
 async def test_confirm_nonexistent_token_returns_404(http: AsyncClient):
     # [FIXED #1]
     res = await http.get("/checkin/confirm?token=totallyFakeToken12345")

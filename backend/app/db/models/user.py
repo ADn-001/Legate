@@ -14,6 +14,8 @@ class UserStatus(str, enum.Enum):
     active = "active"
     suspended = "suspended"
     memorialized = "memorialized"
+    # GDPR erasure requested; full purge task scheduled (FR-05, ≤72h).
+    pending_deletion = "pending_deletion"
     deleted = "deleted"
 
 
@@ -67,6 +69,9 @@ class EncryptionKey(Base):
     delivery_encrypted_cek: MappedColumn[bytes | None] = mapped_column(nullable=True)
     delivery_cek_iv: MappedColumn[bytes | None] = mapped_column(nullable=True)
     recovery_phrase_hash: MappedColumn[str | None] = mapped_column(String(255), nullable=True)
+    recovery_encrypted_cek: MappedColumn[bytes | None] = mapped_column(nullable=True)
+    recovery_cek_iv: MappedColumn[bytes | None] = mapped_column(nullable=True)
+    recovery_salt: MappedColumn[bytes | None] = mapped_column(nullable=True)
     created_at: MappedColumn[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: MappedColumn[datetime] = mapped_column(DateTime(timezone=True))
 

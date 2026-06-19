@@ -1,6 +1,5 @@
 """Business logic for check-in token validation and schedule management."""
 
-import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException, status
@@ -50,12 +49,26 @@ class CheckInService:
             schedule.last_confirmed_at = now
             schedule.next_dispatch_at = now + timedelta(days=schedule.interval_days)
             schedule.snooze_count = 0
+            # B4: a confirm fully resets emergency-pause and grace-reminder
+            # state — otherwise a paused schedule is never dispatched again
+            # (silent dead vault).
+            was_paused = bool(schedule.is_paused)
+            schedule.is_paused = False
+            schedule.pause_count = 0
+            schedule.grace_reminder_sent_at = None
+            schedule.last_grace_reminder_day = None
+            if was_paused:
+                await write_audit(self.db, "checkin_unpaused", user_id=event.user_id)
 
         await write_audit(self.db, "checkin_confirmed", user_id=event.user_id)
         await self.db.commit()
 
         next_due = schedule.next_dispatch_at.isoformat() if schedule else None
-        return {"status": "confirmed", "next_due": next_due}
+        return {
+            "status": "confirmed",
+            "next_due": next_due,
+            "interval_days": schedule.interval_days if schedule else None,
+        }
 
     async def snooze(self, token: str, days: int) -> dict:
         event = await self._validate_token(token)
@@ -88,6 +101,9 @@ class CheckInService:
             base = base.replace(tzinfo=timezone.utc)
         schedule.next_dispatch_at = base + timedelta(days=days)
         schedule.snooze_count += 1
+        # T5: a snooze ends the current grace cycle — reset reminder state.
+        schedule.grace_reminder_sent_at = None
+        schedule.last_grace_reminder_day = None
 
         await write_audit(self.db, "checkin_snoozed", user_id=event.user_id)
         await self.db.commit()
@@ -110,28 +126,32 @@ class CheckInService:
         now = datetime.now(timezone.utc)
         event.status = EventStatus.used
         event.used_at = now
+
+        # FR-24: pause extends the grace deadline by 7 days. The extension is
+        # derived from pause_count in check_grace_periods
+        # (grace_period_days + 7 * pause_count), so a new trigger forms
+        # naturally if the user still doesn't confirm. A confirm (B4) fully
+        # resets this state. Max 2 pauses per trigger event.
         schedule.is_paused = True
         schedule.pause_count += 1
 
-        base = schedule.next_dispatch_at or now
-        if base.tzinfo is None:
-            base = base.replace(tzinfo=timezone.utc)
-        schedule.next_dispatch_at = base + timedelta(days=7)
-
-        # Cancel any active release trigger for this user
+        # Terminate the active trigger for this user (pending_confirmation
+        # during the 48h window, or processing for a legacy in-flight one).
         trigger_result = await self.db.execute(
             select(ReleaseTrigger).where(
                 and_(
                     ReleaseTrigger.user_id == schedule.user_id,
-                    ReleaseTrigger.status == TriggerStatus.processing,
+                    ReleaseTrigger.status.in_([
+                        TriggerStatus.pending_confirmation,
+                        TriggerStatus.processing,
+                    ]),
                 )
             )
         )
-        trigger = trigger_result.scalar_one_or_none()
-        if trigger:
-            trigger.status = TriggerStatus.cancelled
+        for trigger in trigger_result.scalars().all():
+            trigger.status = TriggerStatus.paused_cancelled
             trigger.pause_count = (trigger.pause_count or 0) + 1
 
-        await write_audit(self.db, "trigger_cancelled", user_id=event.user_id)
+        await write_audit(self.db, "trigger_paused_cancelled", user_id=event.user_id)
         await self.db.commit()
         return {"status": "paused"}

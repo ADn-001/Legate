@@ -1,8 +1,11 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { bip39Module } from '../../crypto/bip39'
+import { bip39Module, deriveRecoveryKey, hashMnemonic } from '../../crypto/bip39'
+import { keysModule, toBase64 } from '../../crypto/keys'
+import { authApi } from '../../api/auth'
 import { usersApi } from '../../api/users'
 import { useAuthStore } from '../../store/auth'
+import { requireCek } from '../../store/unlock'
 import Button from '../../components/ui/Button'
 import { Copy, CheckCircle } from 'lucide-react'
 
@@ -13,6 +16,7 @@ export default function StepRecovery() {
   const [checked, setChecked] = useState(false)
   const [copied, setCopied] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     setWords(bip39Module.generatePhrase())
@@ -26,12 +30,34 @@ export default function StepRecovery() {
 
   const handleReady = async () => {
     setLoading(true)
+    setError(null)
     try {
-      await usersApi.update({ needs_onboarding: false })
+      // T4.3: wrap the CEK with a recovery-phrase-derived key and store the
+      // second blob server-side. The phrase itself is never sent.
+      const cek = await requireCek()
+      const mnemonic = words.join(' ')
+      const salt = crypto.getRandomValues(new Uint8Array(16))
+      const recoveryKey = await deriveRecoveryKey(mnemonic, salt)
+      const { encryptedCek, iv } = await keysModule.encryptCEK(cek, recoveryKey)
+      const recoveryPhraseHash = await hashMnemonic(mnemonic)
+
+      await authApi.setRecoveryKey({
+        recovery_encrypted_cek: toBase64(encryptedCek),
+        recovery_cek_iv: toBase64(iv),
+        recovery_salt: toBase64(salt),
+        recovery_phrase_hash: recoveryPhraseHash,
+      })
+
+      try {
+        await usersApi.update({ needs_onboarding: false })
+      } catch {
+        // Non-critical: the user can still proceed, onboarding flag will
+        // resync on next load.
+      }
       authStore.setNeedsOnboarding(false)
       navigate('/vault')
     } catch {
-      navigate('/vault')
+      setError('Could not save your recovery phrase. Please try again.')
     } finally {
       setLoading(false)
     }
@@ -63,6 +89,12 @@ export default function StepRecovery() {
           {copied ? <CheckCircle className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
           {copied ? 'Copied!' : 'Copy to clipboard'}
         </button>
+
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4">
+            <p className="text-sm text-red-700">{error}</p>
+          </div>
+        )}
 
         <label className="flex items-start gap-3 mb-6 cursor-pointer">
           <input

@@ -17,6 +17,22 @@ def get_supabase() -> Client:
     return _client
 
 
+def get_supabase_admin() -> Client:
+    """Fresh service-role client for Admin API calls (`auth.admin.*`).
+
+    The shared get_supabase() singleton has its options.headers mutated by
+    sign_in_with_password / sign_up / refresh_session / verify_otp — each
+    emits a SIGNED_IN event that overwrites the service-role Authorization
+    header with the calling user's JWT (same root cause documented on
+    get_storage() below). `auth.admin.*` endpoints require the service-role
+    key, so admin operations must use a client that is never used for those
+    session calls. `create_client` performs no I/O, so building one per call
+    is cheap and avoids sharing mutable auth state.
+    """
+    cfg = get_settings()
+    return create_client(cfg.supabase_url, cfg.supabase_service_role_key)
+
+
 def get_storage() -> SyncStorageClient:
     """Return a storage-only client using service role key.
 

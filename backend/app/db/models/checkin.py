@@ -32,10 +32,15 @@ class TriggerReason(str, enum.Enum):
 
 
 class TriggerStatus(str, enum.Enum):
+    # 48h emergency-contact window (FR-23/24): trigger created but delivery
+    # deferred until deliver_after; promoted to processing by beat task.
+    pending_confirmation = "pending_confirmation"
     processing = "processing"
     completed = "completed"
     failed = "failed"
     cancelled = "cancelled"
+    # Terminal: emergency contact used the pause link during the 48h window.
+    paused_cancelled = "paused_cancelled"
 
 
 class CheckInSchedule(Base, TimestampMixin):
@@ -53,6 +58,9 @@ class CheckInSchedule(Base, TimestampMixin):
     is_paused: MappedColumn[bool] = mapped_column(Boolean, default=False)
     pause_count: MappedColumn[int] = mapped_column(Integer, default=0)
     grace_reminder_sent_at: MappedColumn[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Grace-day number (3 or 7) of the last reminder sent THIS cycle (FR-16).
+    # Reset to None on confirm/snooze and on new dispatch.
+    last_grace_reminder_day: MappedColumn[int | None] = mapped_column(Integer, nullable=True)
 
     user = relationship("User", back_populates="checkin_schedule")
     events = relationship("CheckInEvent", back_populates="schedule", cascade="all, delete-orphan")
@@ -63,7 +71,10 @@ class CheckInEvent(Base):
 
     id: MappedColumn[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     user_id: MappedColumn[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-    schedule_id: MappedColumn[uuid.UUID] = mapped_column(ForeignKey("checkin_schedules.id"))
+    schedule_id: MappedColumn[uuid.UUID] = mapped_column(ForeignKey("checkin_schedules.id", ondelete="CASCADE"))
+    # NOTE (NFR-12 deviation, accepted): check-in tokens are single-use rows in
+    # the database — token state (pending/used/expired) lives here, not in a
+    # signed/stateless token. See README for rationale.
     token: MappedColumn[str] = mapped_column(String(128), unique=True, index=True, nullable=False)
     token_type: MappedColumn[TokenType] = mapped_column(SAEnum(TokenType), nullable=False)
     status: MappedColumn[EventStatus] = mapped_column(SAEnum(EventStatus), default=EventStatus.pending)
@@ -80,10 +91,12 @@ class ReleaseTrigger(Base):
     __tablename__ = "release_triggers"
 
     id: MappedColumn[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
-    user_id: MappedColumn[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
+    user_id: MappedColumn[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     triggered_at: MappedColumn[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     reason: MappedColumn[TriggerReason] = mapped_column(SAEnum(TriggerReason), nullable=False)
     status: MappedColumn[TriggerStatus] = mapped_column(SAEnum(TriggerStatus), default=TriggerStatus.processing)
+    # Earliest time delivery may run (set to now+48h for pending_confirmation).
+    deliver_after: MappedColumn[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     pause_count: MappedColumn[int] = mapped_column(Integer, default=0)
     meta: MappedColumn[dict | None] = mapped_column(JSONB, nullable=True)
 

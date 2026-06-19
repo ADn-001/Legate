@@ -26,12 +26,26 @@ import Signup from '../pages/auth/Signup'
 // ---------------------------------------------------------------------------
 describe('AppShell', () => {
   it('mounts without throwing', () => {
-    expect(() => render(<AppShell />)).not.toThrow()
+    expect(() =>
+      render(
+        <MemoryRouter>
+          <AppShell>
+            <div>shell-child</div>
+          </AppShell>
+        </MemoryRouter>
+      )
+    ).not.toThrow()
   })
 
-  it('renders placeholder text', () => {
-    render(<AppShell />)
-    expect(screen.getByText(/App Shell/i)).toBeInTheDocument()
+  it('renders its children', () => {
+    render(
+      <MemoryRouter>
+        <AppShell>
+          <div>shell-child</div>
+        </AppShell>
+      </MemoryRouter>
+    )
+    expect(screen.getByText('shell-child')).toBeInTheDocument()
   })
 })
 
@@ -54,11 +68,11 @@ describe('TopBar', () => {
 // ---------------------------------------------------------------------------
 describe('BottomNav', () => {
   it('mounts without throwing', () => {
-    expect(() => render(<BottomNav />)).not.toThrow()
+    expect(() => render(<MemoryRouter><BottomNav /></MemoryRouter>)).not.toThrow()
   })
 
   it('renders a nav element', () => {
-    render(<BottomNav />)
+    render(<MemoryRouter><BottomNav /></MemoryRouter>)
     expect(document.querySelector('nav')).not.toBeNull()
   })
 })

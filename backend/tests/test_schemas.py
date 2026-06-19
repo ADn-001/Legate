@@ -26,12 +26,23 @@ from app.db.models.user import UserStatus
 def test_signup_request_valid():
     obj = SignupRequest(
         email="user@example.com",
-        password="secret",
+        password="StrongPassw0rd!",
         encrypted_cek="base64cek",
         cek_iv="base64iv",
         pbkdf2_salt="base64salt",
     )
     assert obj.email == "user@example.com"
+
+
+def test_signup_request_weak_password_raises():
+    with pytest.raises(ValidationError):
+        SignupRequest(
+            email="user@example.com",
+            password="secret",  # <12 chars, no digit, no special char
+            encrypted_cek="cek",
+            cek_iv="iv",
+            pbkdf2_salt="salt",
+        )
 
 
 def test_signup_request_missing_email_raises():
@@ -265,6 +276,18 @@ def test_capsule_response_valid():
         updated_at=datetime.now(timezone.utc),
     )
     assert obj.status == CapsuleStatus.draft
+    # FR-22 zero-recipient flag defaults to True when unannotated
+    assert obj.has_recipients is True
+
+
+def test_capsule_create_negative_content_size_raises():
+    with pytest.raises(ValidationError):
+        CapsuleCreate(
+            title="Test",
+            beneficiary_id=uuid.uuid4(),
+            cipher_iv="iv",
+            content_size_bytes=-1,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -280,6 +303,33 @@ def test_checkin_settings_update_all_optional():
 def test_checkin_settings_update_partial():
     obj = CheckInSettingsUpdate(interval_days=30)
     assert obj.interval_days == 30
+
+
+# B15 / FR-11: interval bounded to 7–365 days
+def test_checkin_settings_update_interval_below_min_raises():
+    with pytest.raises(ValidationError):
+        CheckInSettingsUpdate(interval_days=6)
+
+
+def test_checkin_settings_update_interval_above_max_raises():
+    with pytest.raises(ValidationError):
+        CheckInSettingsUpdate(interval_days=366)
+
+
+def test_checkin_settings_update_interval_bounds_accepted():
+    assert CheckInSettingsUpdate(interval_days=7).interval_days == 7
+    assert CheckInSettingsUpdate(interval_days=365).interval_days == 365
+
+
+# B15 / FR-12: grace period restricted to {3, 7, 14, 30}
+def test_checkin_settings_update_grace_invalid_value_raises():
+    with pytest.raises(ValidationError):
+        CheckInSettingsUpdate(grace_period_days=5)
+
+
+def test_checkin_settings_update_grace_valid_values_accepted():
+    for value in (3, 7, 14, 30):
+        assert CheckInSettingsUpdate(grace_period_days=value).grace_period_days == value
 
 
 # ---------------------------------------------------------------------------

@@ -150,3 +150,20 @@ async def test_delete_beneficiary(auth_client: AsyncClient):
         assert row is not None
         assert row.status.value == "removed"
         assert row.removed_at is not None
+
+
+@pytest.mark.asyncio
+async def test_removed_beneficiary_excluded_from_list(auth_client: AsyncClient):
+    """B13 / FR-22: removed beneficiaries must not appear in the default list
+    (fixes removed people showing in dropdowns / emergency-contact picker)."""
+    create_res = await auth_client.post("/beneficiaries/", json={
+        **VALID_BENEFICIARY,
+        "email": f"removedhidden_{uuid.uuid4().hex[:6]}@testlegate.dev",
+    })
+    bene_id = create_res.json()["id"]
+    await auth_client.delete(f"/beneficiaries/{bene_id}")
+
+    res = await auth_client.get("/beneficiaries/")
+    assert res.status_code == 200
+    assert all(b["id"] != bene_id for b in res.json()), \
+        "B13 regression: removed beneficiary still listed"

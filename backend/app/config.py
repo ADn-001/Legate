@@ -15,6 +15,10 @@ class Settings(BaseSettings):
     debug: bool = False
     secret_key: str
     environment: str = "development"
+    # ASGI root path when served behind a prefix-stripping proxy (e.g. nginx /api/)
+    root_path: str = ""
+    # Comma-separated list of allowed CORS origins; empty -> dev localhost defaults
+    cors_origins: str = ""
 
     # Database
     database_url: str
@@ -41,11 +45,31 @@ class Settings(BaseSettings):
     supabase_jwt_secret: str = "fake-jwt-secret"
     delivery_secret: str = "fake-delivery-secret"
     base_url: str = "http://localhost:8000"
+    # T6: base URL of the frontend SPA, used as the Supabase password-reset
+    # magic-link redirect target (-> {frontend_url}/auth/reset-password).
+    frontend_url: str = "http://localhost:5173"
 
     # Storage
     supabase_storage_bucket_content: str = "capsule-content"
     supabase_storage_bucket_media: str = "media-attachments"
     supabase_storage_bucket_thumbnails: str = "thumbnails"
+    # Per-user storage quota for the FR-36 progress bar (default 1 GiB)
+    storage_quota_bytes: int = 1073741824
+
+    # Internal operational alerts (B6: permanent delivery failure).
+    # Empty string disables alert emails (audit log row is always written).
+    alert_email: str = ""
+
+
+    @property
+    def cors_origins_list(self) -> list[str]:
+        """Parsed CORS origins. Falls back to dev localhost ports when unset."""
+        origins = [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+        if origins:
+            return origins
+        return [f"http://localhost:{p}" for p in range(5173, 5180)] + [
+            f"http://127.0.0.1:{p}" for p in range(5173, 5180)
+        ]
 
 
 @lru_cache

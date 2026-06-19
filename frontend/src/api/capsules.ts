@@ -12,4 +12,6 @@ export const capsulesApi = {
   create: (data: CapsuleCreatePayload) => client.post('/capsules/', data),
   update: (id: string, data: Record<string, unknown>) => client.patch(`/capsules/${id}`, data),
   delete: (id: string) => client.delete(`/capsules/${id}`),
+  getContent: (id: string) => client.get(`/capsules/${id}/content`),
+  getUploadUrl: (id: string) => client.post(`/capsules/${id}/content`),
 }
