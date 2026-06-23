@@ -38,11 +38,11 @@ export const hashMnemonic = async (mnemonic: string): Promise<string> => {
 // Derives an AES-256-GCM key from the recovery phrase + a per-user random
 // salt via the BIP-39 seed (PBKDF2-HMAC-SHA512, 2048 rounds) -> HKDF-SHA256.
 // Used to wrap/unwrap the second CEK blob (`recovery_encrypted_cek`).
-export const deriveRecoveryKey = async (mnemonic: string, salt: Uint8Array): Promise<CryptoKey> => {
-  const seed = mnemonicToSeedSync(normalizeMnemonic(mnemonic))
+export const deriveRecoveryKey = async (mnemonic: string, salt: Uint8Array<ArrayBuffer>): Promise<CryptoKey> => {
+  const seed = new Uint8Array(mnemonicToSeedSync(normalizeMnemonic(mnemonic)))
   const keyMaterial = await crypto.subtle.importKey('raw', seed, 'HKDF', false, ['deriveKey'])
   return crypto.subtle.deriveKey(
-    { name: 'HKDF', salt: salt as unknown as BufferSource, info: new TextEncoder().encode('legate-recovery-cek-wrap'), hash: 'SHA-256' },
+    { name: 'HKDF', salt, info: new TextEncoder().encode('legate-recovery-cek-wrap'), hash: 'SHA-256' },
     keyMaterial,
     { name: 'AES-GCM', length: 256 },
     false,

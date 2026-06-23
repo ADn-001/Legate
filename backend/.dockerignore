@@ -1,6 +1,7 @@
 .venv
 venv
 tests/
+scripts/
 celerybeat-schedule
 __pycache__/
 *.pyc

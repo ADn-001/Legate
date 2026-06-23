@@ -1,6 +1,7 @@
 """Business logic for capsule CRUD operations."""
 
 import uuid
+import secrets
 
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -204,7 +205,12 @@ class CapsuleService:
         capsule = await self.get_by_id(capsule_id, user_id)
 
         cfg = get_settings()
-        storage_path = f"{user_id}/{capsule.id}/content.enc"
+        # Each edit gets a unique path so create_signed_upload_url (which
+        # defaults to upsert=False) never collides with the previous upload.
+        # Old content files are orphaned and cleaned up when the capsule is
+        # purged. The capsule record is updated with the new path by the
+        # PATCH that follows the upload.
+        storage_path = f"{user_id}/{capsule.id}/content_{secrets.token_hex(8)}.enc"
         try:
             storage = get_storage()
             response = storage.from_(cfg.supabase_storage_bucket_content).create_signed_upload_url(storage_path)
@@ -217,6 +223,29 @@ class CapsuleService:
         if not upload_url:
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Could not generate upload URL")
         return {"upload_url": upload_url, "storage_object_path": storage_path}
+
+    async def upload_content(self, capsule_id: uuid.UUID, user_id: uuid.UUID, data: bytes) -> dict:
+        """Server-side upload of encrypted content blob (edit flow).
+
+        Avoids the browser→Supabase signed-URL PUT which can stall due to
+        upsert conflicts. Uses the service-role key directly with a unique
+        storage path, so no object conflict is possible.
+        """
+        await self.get_by_id(capsule_id, user_id)  # ownership check
+        cfg = get_settings()
+        storage_path = f"{user_id}/{capsule_id}/content_{secrets.token_hex(8)}.enc"
+        try:
+            storage = get_storage()
+            storage.from_(cfg.supabase_storage_bucket_content).upload(
+                path=storage_path,
+                file=data,
+                file_options={"contentType": "application/octet-stream"},
+            )
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).error("upload_content failed: %s", exc)
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Content upload failed")
+        return {"storage_object_path": storage_path}
 
     async def delete(self, capsule_id: uuid.UUID, user_id: uuid.UUID) -> None:
         capsule = await self.get_by_id(capsule_id, user_id)

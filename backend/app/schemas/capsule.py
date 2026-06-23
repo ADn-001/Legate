@@ -67,3 +67,8 @@ class CapsuleUploadUrlResponse(BaseModel):
     """Short-lived signed upload URL for (re-)writing the content blob."""
     upload_url: str
     storage_object_path: str
+
+
+class CapsuleUploadContentResponse(BaseModel):
+    """Returned after a server-side content upload (edit flow)."""
+    storage_object_path: str

@@ -2,6 +2,8 @@
 FastAPI dependency injection functions.
 """
 
+from datetime import timedelta
+
 import jwt as pyjwt
 from jwt import PyJWKClient
 from fastapi import Depends, HTTPException, status
@@ -19,6 +21,11 @@ bearer_scheme = HTTPBearer()
 
 # Cached JWKS client — fetches & caches public keys from Supabase
 _jwks_client: PyJWKClient | None = None
+
+# Tolerate up to 10 s of clock skew between the Docker container and Supabase
+# GoTrue (AWS-hosted). Without leeway, freshly-issued ES256 tokens fail PyJWT's
+# iat check with ImmatureSignatureError when the container clock is behind GoTrue.
+_JWT_LEEWAY = timedelta(seconds=10)
 
 
 def _get_jwks_client() -> PyJWKClient:
@@ -41,6 +48,7 @@ def _decode_supabase_jwt(token: str) -> dict:
             cfg.supabase_jwt_secret,
             algorithms=["HS256"],
             audience="authenticated",
+            leeway=_JWT_LEEWAY,
         )
     except pyjwt.InvalidAlgorithmError:
         pass
@@ -55,8 +63,11 @@ def _decode_supabase_jwt(token: str) -> dict:
             signing_key.key,
             algorithms=["ES256"],
             audience="authenticated",
+            leeway=_JWT_LEEWAY,
         )
     except pyjwt.PyJWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+    except Exception:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
 
