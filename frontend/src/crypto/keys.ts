@@ -24,7 +24,12 @@ export const keysModule = {
 
   decryptCEK: async (encryptedCek: Uint8Array<ArrayBuffer>, wrappingKey: CryptoKey, iv: Uint8Array<ArrayBuffer>): Promise<CryptoKey> => {
     const rawCek = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, wrappingKey, encryptedCek)
-    return crypto.subtle.importKey('raw', rawCek, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt'])
+    // extractable MUST be true (matches generateCEK) — every caller that
+    // unwraps an existing CEK (login, unlock modal, password reset/change,
+    // recovery, regenerate-recovery-phrase) immediately re-wraps it under a
+    // different key via encryptCEK, which exportKey()s it. A non-extractable
+    // key throws "key is not extractable" the moment any of those run.
+    return crypto.subtle.importKey('raw', rawCek, { name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt'])
   },
 
   importHexKey: async (hex: string): Promise<CryptoKey> => {

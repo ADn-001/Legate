@@ -5,7 +5,7 @@ Capsule CRUD routes.
 import uuid
 from pydantic import BaseModel
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db_session
@@ -16,6 +16,7 @@ from app.schemas.capsule import (
     CapsuleResponse,
     CapsuleContentResponse,
     CapsuleUploadUrlResponse,
+    CapsuleUploadContentResponse,
 )
 from app.services.capsule_service import CapsuleService
 
@@ -93,6 +94,22 @@ async def get_capsule_upload_url(
 ):
     svc = CapsuleService(db)
     return await svc.get_upload_url(capsule_id, current_user.id)
+
+
+@router.put("/{capsule_id}/content", response_model=CapsuleUploadContentResponse)
+async def upload_capsule_content(
+    capsule_id: uuid.UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db_session),
+    current_user=Depends(get_current_verified_user),
+):
+    """Receive the encrypted blob from the browser and upload it to Supabase
+    Storage server-side using the service-role key.  Used by the edit flow so
+    that the browser never needs a signed upload URL (which can stall due to
+    the signed-URL PUT hanging on the existing-object path)."""
+    data = await request.body()
+    svc = CapsuleService(db)
+    return await svc.upload_content(capsule_id, current_user.id, data)
 
 
 @router.delete("/{capsule_id}", status_code=status.HTTP_204_NO_CONTENT)

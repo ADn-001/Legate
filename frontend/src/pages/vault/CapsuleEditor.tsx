@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, AlertTriangle } from 'lucide-react'
 import { capsulesApi } from '../../api/capsules'
 import { useBeneficiaries } from '../../hooks/useBeneficiaries'
@@ -50,6 +51,7 @@ export default function CapsuleEditor() {
   const navigate = useNavigate()
   const { id } = useParams()
   const isEdit = !!id
+  const queryClient = useQueryClient()
 
   const [title, setTitle] = useState('')
   const [message, setMessage] = useState('')
@@ -207,10 +209,11 @@ export default function CapsuleEditor() {
       const cipherIvHex = bytesToHex(iv)
 
       if (isEdit && id) {
-        // T5 (F5): re-encrypt and upload to a fresh signed URL for the same
-        // object path, then PATCH the capsule — never create a duplicate.
-        const { data: uploadData } = await capsulesApi.getUploadUrl(id)
-        await uploadEncryptedBlob(uploadData.upload_url, new Blob([ciphertext]))
+        // T5 (F5): re-encrypt and upload via the backend (server-side PUT to
+        // Supabase Storage), then PATCH the capsule — never create a duplicate.
+        // Using uploadContent (PUT /capsules/{id}/content) avoids the
+        // browser→Supabase signed-URL PUT which can stall on the edit path.
+        const { data: uploadData } = await capsulesApi.uploadContent(id, ciphertext)
         await capsulesApi.update(id, {
           title,
           beneficiary_id: beneficiaryId,
@@ -244,6 +247,9 @@ export default function CapsuleEditor() {
       }
 
       localStorage.removeItem(`draft_capsule_${id || 'new'}`)
+      // Invalidate the capsules cache so CapsuleList immediately fetches fresh
+      // data rather than showing the stale [] from Dashboard's initial load.
+      await queryClient.invalidateQueries({ queryKey: ['capsules'] })
       navigate('/vault/capsules')
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to save capsule'

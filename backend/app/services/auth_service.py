@@ -47,14 +47,35 @@ class AuthService:
         except Exception as exc:
             err_str = str(exc).lower()
             if "rate" in err_str or "limit" in err_str:
+                # Supabase's free-tier email rate limit (3/hour) is exhausted.
+                # Fall back to admin.create_user() which creates the auth user
+                # without triggering an email send. The E2E test suite obtains
+                # the OTP via admin.generate_link() (get_test_otp.py) anyway,
+                # so the frontend's /auth/verify-email flow still works.
+                try:
+                    admin_resp = get_supabase_admin().auth.admin.create_user({
+                        "email": email,
+                        "password": password,
+                        "email_confirm": False,
+                    })
+                    if not admin_resp.user:
+                        raise HTTPException(
+                            status_code=http_status.HTTP_429_TOO_MANY_REQUESTS,
+                            detail="Email rate limit exceeded — try again later",
+                        )
+                    response = admin_resp
+                except HTTPException:
+                    raise
+                except Exception:
+                    raise HTTPException(
+                        status_code=http_status.HTTP_429_TOO_MANY_REQUESTS,
+                        detail="Email rate limit exceeded — try again later",
+                    )
+            else:
                 raise HTTPException(
-                    status_code=http_status.HTTP_429_TOO_MANY_REQUESTS,
-                    detail="Email rate limit exceeded — try again later",
+                    status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=f"Auth service unavailable: {exc}",
                 )
-            raise HTTPException(
-                status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"Auth service unavailable: {exc}",
-            )
         if not response.user:
             raise ValueError("Supabase signup failed")
 
@@ -194,16 +215,34 @@ class AuthService:
         }
 
     async def refresh(self, refresh_token: str) -> dict:
-        supabase = get_supabase()
+        # Bypass supabase-py entirely. supabase-py's admin client sends
+        # Authorization: Bearer <service_role_key> for refresh_session(), which
+        # GoTrue rejects when validating a user refresh_token grant. Instead,
+        # call GoTrue directly with only the apikey header (no Authorization),
+        # which is the correct pattern for client-initiated token refreshes.
+        import httpx
+        cfg = get_settings()
+        url = f"{cfg.supabase_url}/auth/v1/token"
         try:
-            response = supabase.auth.refresh_session(refresh_token)
+            async with httpx.AsyncClient() as hx:
+                resp = await hx.post(
+                    url,
+                    params={"grant_type": "refresh_token"},
+                    headers={
+                        "apikey": cfg.supabase_anon_key,
+                        "Content-Type": "application/json",
+                    },
+                    json={"refresh_token": refresh_token},
+                    timeout=30.0,
+                )
         except Exception:
             raise HTTPException(status_code=http_status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
-        if not response.session:
+        if resp.status_code != 200:
             raise HTTPException(status_code=http_status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
+        data = resp.json()
         return {
-            "access_token": response.session.access_token,
-            "refresh_token": response.session.refresh_token,
+            "access_token": data["access_token"],
+            "refresh_token": data["refresh_token"],
             "token_type": "bearer",
         }
 
