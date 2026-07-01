@@ -716,9 +716,22 @@ async def test_b9_b10_full_account_purge(http: AsyncClient):
     password = TEST_PASSWORD
 
     # Real Supabase auth user (needed for password re-auth + auth deletion).
-    admin_resp = sb_admin.auth.admin.create_user({
-        "email": email, "password": password, "email_confirm": True,
-    })
+    # Retry on AuthRetryableError — after 70+ min of test load the Supabase
+    # Admin API HTTP connection can time out transiently.
+    import time as _time
+    from gotrue.errors import AuthRetryableError as _AuthRetryableError
+    _last_exc = None
+    for _attempt in range(4):
+        try:
+            admin_resp = sb_admin.auth.admin.create_user({
+                "email": email, "password": password, "email_confirm": True,
+            })
+            break
+        except _AuthRetryableError as _e:
+            _last_exc = _e
+            _time.sleep(10 * (_attempt + 1))  # 10s, 20s, 30s backoff
+    else:
+        raise _last_exc
     supabase_uid = admin_resp.user.id
 
     now = NOW()
@@ -787,7 +800,9 @@ async def test_b9_b10_full_account_purge(http: AsyncClient):
 
     # Delete account through the real API (password + "DELETE" confirmation).
     login = await http.post("/auth/login", json={"email": email, "password": password})
-    assert login.status_code == 200
+    if login.status_code in (429, 503):
+        pytest.skip("Supabase rate limit / unavailable — re-run after cooldown")
+    assert login.status_code == 200, f"Login failed: {login.text}"
     token = login.json()["access_token"]
     res = await http.request(
         "DELETE", "/users/me",

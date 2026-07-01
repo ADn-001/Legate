@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { capsulesApi } from '../../api/capsules'
+import { settingsApi } from '../../api/settings'
 import { useBeneficiaries } from '../../hooks/useBeneficiaries'
 import { useCryptoStore } from '../../store/crypto'
 import { useAuthStore } from '../../store/auth'
@@ -39,6 +40,7 @@ export default function StepCapsule() {
       const { id: capsuleId, upload_url } = data
       await uploadEncryptedBlob(upload_url, new Blob([ciphertext]))
       await capsulesApi.update(capsuleId, { storage_object_path: `${user!.id}/${capsuleId}/content.enc` })
+      await settingsApi.patchSettings({ setup_step: 4 }).catch(() => {})
       navigate('/setup/recovery')
     } catch {
       setError('Failed to save capsule. Please try again.')
@@ -105,7 +107,15 @@ export default function StepCapsule() {
         </div>
 
         <div className="flex gap-3 mt-6">
-          <Button variant="secondary" fullWidth onClick={() => navigate('/setup/recovery')} disabled={saving}>
+          <Button
+            variant="secondary"
+            fullWidth
+            onClick={async () => {
+              await settingsApi.patchSettings({ setup_step: 4 }).catch(() => {})
+              navigate('/setup/recovery')
+            }}
+            disabled={saving}
+          >
             Skip for now
           </Button>
           <Button fullWidth loading={saving} onClick={handleSave}>

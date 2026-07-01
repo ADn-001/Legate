@@ -22,7 +22,7 @@ async def second_user(http: AsyncClient):
         "delivery_cek_iv": "dGVzdA==",
     })
 
-    if res.status_code == 429:
+    if res.status_code in (429, 503):
         await _create_user_via_admin(email, password)
     else:
         assert res.status_code == 201
@@ -31,9 +31,28 @@ async def second_user(http: AsyncClient):
         sb_user = next((u for u in users if u.email == email), None)
         if sb_user:
             sb.auth.admin.update_user_by_id(sb_user.id, {"email_confirm": True})
+        # Also mark email_verified in the local DB — get_current_verified_user
+        # checks this column, not Supabase Auth. Without this the second user
+        # always gets 403 instead of the expected 404 on resource isolation tests.
+        from sqlalchemy import select as sa_select
+        from app.db.models.user import User as UserModel
+        async with AsyncSessionLocal() as db:
+            r = await db.execute(sa_select(UserModel).where(UserModel.email == email))
+            u = r.scalar_one()
+            u.email_verified = True
+            await db.commit()
 
-    login = await http.post("/auth/login", json={"email": email, "password": password})
-    assert login.status_code == 200
+    import asyncio
+    login = None
+    for _attempt in range(4):
+        login = await http.post("/auth/login", json={"email": email, "password": password})
+        if login.status_code == 200:
+            break
+        if login.status_code in (429, 503):
+            pytest.skip("Supabase rate limit / unavailable — re-run after cooldown")
+        if _attempt < 3:
+            await asyncio.sleep(5 * (_attempt + 1))
+    assert login is not None and login.status_code == 200, f"Login failed: {login.text}"
     data = login.json()
     return {"access_token": data["access_token"], "email": email}
 

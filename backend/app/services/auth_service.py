@@ -3,6 +3,7 @@ Business logic for authentication: signup, login, email verification,
 token refresh, and account deletion.
 """
 
+import asyncio
 import base64
 import hmac
 import hashlib
@@ -43,10 +44,23 @@ class AuthService:
             )
         supabase = get_supabase()
         try:
-            response = supabase.auth.sign_up({"email": email, "password": password})
+            # Run the blocking supabase-py call in a thread so it doesn't
+            # stall the uvicorn event loop.  Hard-cap at 30 s: if GoTrue
+            # hangs longer than that it is almost always because the free-tier
+            # email rate limit was hit and GoTrue is waiting for the email
+            # queue to drain.  asyncio.TimeoutError falls through to the
+            # admin.create_user() fallback below exactly like an explicit
+            # "rate limit" exception.
+            response = await asyncio.wait_for(
+                asyncio.to_thread(
+                    supabase.auth.sign_up, {"email": email, "password": password}
+                ),
+                timeout=30.0,
+            )
         except Exception as exc:
+            is_timeout = isinstance(exc, asyncio.TimeoutError)
             err_str = str(exc).lower()
-            if "rate" in err_str or "limit" in err_str:
+            if is_timeout or "rate" in err_str or "limit" in err_str:
                 # Supabase's free-tier email rate limit (3/hour) is exhausted.
                 # Fall back to admin.create_user() which creates the auth user
                 # without triggering an email send. The E2E test suite obtains
@@ -192,9 +206,17 @@ class AuthService:
         return {"message": "Verification email sent"}
 
     async def login(self, email: str, password: str) -> dict:
-        supabase = get_supabase()
+        # Use a fresh anon client per login. The shared get_supabase() singleton
+        # accumulates SIGNED_IN event mutations that overwrite options.headers
+        # ["Authorization"] with the calling user's JWT. After 70+ minutes of
+        # test operations the GoTrueClient's state can cause sign_in_with_password
+        # to raise unexpectedly. Fresh client = clean state. Same pattern as
+        # delete_account. Uses anon key (not service role) per GoTrue convention.
+        from supabase import create_client as _create_client
+        _cfg = get_settings()
+        _fresh = _create_client(_cfg.supabase_url, _cfg.supabase_anon_key)
         try:
-            response = supabase.auth.sign_in_with_password({"email": email, "password": password})
+            response = _fresh.auth.sign_in_with_password({"email": email, "password": password})
         except Exception:
             raise HTTPException(status_code=http_status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
         if not response.session:
@@ -254,10 +276,17 @@ class AuthService:
             pass  # session may already be invalid
 
     async def delete_account(self, user: User, password: str) -> None:
-        supabase = get_supabase()
-        # Re-authenticate to confirm password
+        # Use a fresh client for password re-auth. The shared get_supabase()
+        # singleton accumulates SIGNED_IN event mutations (options.headers gets
+        # overwritten with the latest user JWT) across the lifetime of the
+        # process. After many auth operations the GoTrueClient's internal state
+        # can cause sign_in_with_password to raise unexpectedly. A fresh client
+        # has clean state, same as get_supabase_admin().
+        from supabase import create_client
+        cfg = get_settings()
+        fresh_sb = create_client(cfg.supabase_url, cfg.supabase_service_role_key)
         try:
-            response = supabase.auth.sign_in_with_password({"email": user.email, "password": password})
+            response = fresh_sb.auth.sign_in_with_password({"email": user.email, "password": password})
         except Exception:
             raise HTTPException(status_code=http_status.HTTP_401_UNAUTHORIZED, detail="Invalid password")
         if not response.session:
@@ -375,9 +404,12 @@ class AuthService:
         re-authenticating with Supabase, then updates the Supabase auth
         password and re-wraps the primary CEK blob with the new
         password-derived key."""
-        supabase = get_supabase()
+        # Fresh client for re-auth — same singleton contamination risk as login/delete_account.
+        from supabase import create_client as _create_client
+        _cfg = get_settings()
+        _fresh = _create_client(_cfg.supabase_url, _cfg.supabase_anon_key)
         try:
-            response = supabase.auth.sign_in_with_password({"email": user.email, "password": current_password})
+            response = _fresh.auth.sign_in_with_password({"email": user.email, "password": current_password})
         except Exception:
             raise HTTPException(status_code=http_status.HTTP_401_UNAUTHORIZED, detail="Incorrect current password")
         if not response.session:

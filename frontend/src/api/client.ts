@@ -62,6 +62,15 @@ client.interceptors.response.use(
         return new Promise(() => {})
       }
     }
+    // T7: surface 429 rate-limit errors with a user-facing toast
+    if (responseStatus === 429) {
+      const retryAfter = error.response?.headers?.['retry-after']
+      const msg = retryAfter
+        ? `Too many attempts. Please wait ${retryAfter} seconds and try again.`
+        : 'Too many attempts. Please wait a moment and try again.'
+      // Dispatch a custom event that AppShell listens to in order to show a toast
+      window.dispatchEvent(new CustomEvent('legate:ratelimit', { detail: { message: msg } }))
+    }
     return Promise.reject(error)
   }
 )

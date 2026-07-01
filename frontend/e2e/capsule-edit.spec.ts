@@ -20,7 +20,10 @@ test('editing a capsule decrypts existing content and re-save never duplicates i
   // and handleSave() bails with "Please select a beneficiary" without reaching the API.
   await expect(page.locator('select')).not.toHaveValue('', { timeout: 10_000 })
   await page.locator('input[placeholder="e.g. Instructions for Sarah"]').fill(title)
-  await page.locator('textarea[placeholder="Write your message here..."]').fill('Original content.')
+  // T9/Phase 4: editor is tiptap (contenteditable div), not a textarea
+  const editor = page.locator('[contenteditable="true"]')
+  await editor.click()
+  await editor.pressSequentially('Original content.')
   await page.getByRole('button', { name: 'Save Capsule' }).click()
   await expect(page).toHaveURL(/\/vault\/capsules$/, { timeout: 20_000 })
 
@@ -31,15 +34,16 @@ test('editing a capsule decrypts existing content and re-save never duplicates i
   await expect(card).toHaveCount(1, { timeout: 10_000 })
 
   // F5: edit route fetches the capsule, downloads the signed blob, and
-  // decrypts it with the CEK into the editor — not blank.
+  // decrypts it with the CEK into the tiptap editor — not blank.
   await card.getByRole('button', { name: 'Edit capsule' }).click()
   await expect(page).toHaveURL(/\/vault\/capsules\/[^/]+$/, { timeout: 10_000 })
-  await expect(page.locator('textarea[placeholder="Write your message here..."]')).toHaveValue(
+  await expect(page.locator('[contenteditable="true"]')).toContainText(
     'Original content.',
     { timeout: 10_000 }
   )
 
-  await page.locator('textarea[placeholder="Write your message here..."]').fill('Updated content after edit.')
+  await page.locator('[contenteditable="true"]').selectText()
+  await page.keyboard.type('Updated content after edit.')
   await page.getByRole('button', { name: 'Update Capsule' }).click()
   await expect(page).toHaveURL(/\/vault\/capsules$/, { timeout: 20_000 })
 

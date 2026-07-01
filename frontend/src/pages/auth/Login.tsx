@@ -3,9 +3,17 @@ import { useState } from 'react'
 import axios from 'axios'
 import { Shield } from 'lucide-react'
 import { authApi } from '../../api/auth'
+import { settingsApi } from '../../api/settings'
 import { keysModule, fromBase64 } from '../../crypto/keys'
 import { useAuthStore } from '../../store/auth'
 import { useCryptoStore } from '../../store/crypto'
+
+const SETUP_STEP_PATHS: Record<number, string> = {
+  1: '/setup/checkin',
+  2: '/setup/beneficiary',
+  3: '/setup/capsule',
+  4: '/setup/recovery',
+}
 
 // T12 (F14): differentiate login failures so the user knows whether to
 // retry their credentials or wait for the server to come back.
@@ -46,7 +54,20 @@ export default function Login() {
       useCryptoStore.getState().setCek(cek)
 
       if (meData.needs_onboarding) {
-        navigate('/setup/checkin')
+        // Resume wizard at the step the user left off (T5/Phase 4).
+        // Fresh users (step 1) who haven't seen the onboarding carousel go
+        // there first (FR-07). Returning users resume at their current step.
+        try {
+          const { data: settings } = await settingsApi.getSettings()
+          const step = settings.setup_step ?? 1
+          if (step === 1 && !localStorage.getItem('legate_carousel_seen')) {
+            navigate('/setup/welcome')
+          } else {
+            navigate(SETUP_STEP_PATHS[step] ?? '/setup/checkin')
+          }
+        } catch {
+          navigate('/setup/welcome')
+        }
       } else {
         navigate('/vault')
       }

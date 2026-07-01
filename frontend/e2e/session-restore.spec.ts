@@ -16,7 +16,10 @@ test('session survives a reload and a locked vault unlocks via the modal', async
   // Wait for the beneficiary auto-select before saving (see capsule-edit.spec.ts).
   await expect(page.locator('select')).not.toHaveValue('', { timeout: 10_000 })
   await page.locator('input[placeholder="e.g. Instructions for Sarah"]').fill(title)
-  await page.locator('textarea[placeholder="Write your message here..."]').fill('Content for session-restore spec.')
+  // T9/Phase 4: tiptap contenteditable replaces textarea
+  const editor = page.locator('[contenteditable="true"]')
+  await editor.click()
+  await editor.pressSequentially('Content for session-restore spec.')
   await page.getByRole('button', { name: 'Save Capsule' }).click()
   await expect(page).toHaveURL(/\/vault\/capsules$/, { timeout: 20_000 })
 

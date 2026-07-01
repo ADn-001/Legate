@@ -15,6 +15,7 @@ import StepCheckin from './pages/setup/StepCheckin'
 import StepBeneficiary from './pages/setup/StepBeneficiary'
 import StepCapsule from './pages/setup/StepCapsule'
 import StepRecovery from './pages/setup/StepRecovery'
+import OnboardingCarousel from './pages/setup/OnboardingCarousel'
 import Dashboard from './pages/vault/Dashboard'
 import CapsuleList from './pages/vault/CapsuleList'
 import CapsuleEditor from './pages/vault/CapsuleEditor'
@@ -23,6 +24,9 @@ import Beneficiaries from './pages/people/Beneficiaries'
 import Security from './pages/security/Security'
 import Recover from './pages/security/Recover'
 import Activity from './pages/activity/Activity'
+import HowItWorks from './pages/static/HowItWorks'
+import Privacy from './pages/static/Privacy'
+import Terms from './pages/static/Terms'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore(s => s.isAuthenticated)
@@ -43,6 +47,9 @@ export function AppRouter() {
           <Route path="/auth/forgot-password" element={<ForgotPassword />} />
           <Route path="/auth/reset-password" element={<ResetPassword />} />
 
+          {/* T5/FR-07: onboarding carousel — full-screen, before the wizard */}
+          <Route path="/setup/welcome" element={<ProtectedRoute><OnboardingCarousel /></ProtectedRoute>} />
+
           {/* Setup wizard — requires auth */}
           <Route path="/setup" element={<ProtectedRoute><SetupLayout /></ProtectedRoute>}>
             <Route path="checkin" element={<StepCheckin />} />
@@ -61,6 +68,11 @@ export function AppRouter() {
           <Route path="/security" element={<ProtectedRoute><Security /></ProtectedRoute>} />
           <Route path="/recover" element={<ProtectedRoute><Recover /></ProtectedRoute>} />
           <Route path="/activity" element={<ProtectedRoute><Activity /></ProtectedRoute>} />
+
+          {/* Static pages (no auth required) */}
+          <Route path="/how-it-works" element={<HowItWorks />} />
+          <Route path="/privacy" element={<Privacy />} />
+          <Route path="/terms" element={<Terms />} />
 
           {/* Fallback */}
           <Route path="*" element={<Navigate to="/" replace />} />

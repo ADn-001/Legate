@@ -45,3 +45,6 @@ frontend/test-results/
 frontend/playwright-report/
 frontend/playwright/.cache/
 frontend/e2e/.shared-user.json
+
+# Node
+node_modules/

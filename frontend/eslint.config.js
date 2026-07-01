@@ -20,6 +20,10 @@ export default [
       // produces false positives on TS-specific syntax and ambient/DOM
       // globals. This is the official typescript-eslint guidance.
       'no-undef': 'off',
+      // NFR-09 / S6 (Phase 5 T6): prevent accidental logging of CEK, passwords,
+      // or decrypted content.  console.error is allowed for error reporting;
+      // all other console methods are errors so regressions fail lint.
+      'no-console': ['error', { allow: ['error', 'warn'] }],
     },
   },
 ]

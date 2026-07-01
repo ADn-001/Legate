@@ -11,6 +11,8 @@ engine = create_async_engine(
     cfg.database_url.replace("postgresql://", "postgresql+asyncpg://"),
     echo=cfg.debug,
     pool_pre_ping=True,
+    pool_size=2,
+    max_overflow=2,
 )
 
 AsyncSessionLocal = async_sessionmaker(

@@ -1,8 +1,8 @@
 import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import axios from 'axios'
-import { ArrowLeft, Shield, Lock, Phone, KeyRound, CheckCircle, HardDrive, RefreshCw, Copy, AlertTriangle } from 'lucide-react'
+import { ArrowLeft, Shield, Lock, Phone, KeyRound, CheckCircle, HardDrive, RefreshCw, Copy, AlertTriangle, Clock, FileDown } from 'lucide-react'
 import { useBeneficiaries, useUpdateBeneficiary } from '../../hooks/useBeneficiaries'
 import { useAuthStore } from '../../store/auth'
 import { useCryptoStore } from '../../store/crypto'
@@ -14,7 +14,7 @@ import { bip39Module, deriveRecoveryKey, hashMnemonic } from '../../crypto/bip39
 import Button from '../../components/ui/Button'
 import Modal from '../../components/ui/Modal'
 import Input from '../../components/ui/Input'
-import { Beneficiary, StorageUsage } from '../../types/api'
+import { Beneficiary, StorageUsage, CheckinSchedule } from '../../types/api'
 
 const PASSWORD_HELP = 'At least 12 characters, with a number and a special character.'
 
@@ -29,8 +29,55 @@ const formatBytes = (bytes: number): string => {
   return `${(bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1)} ${units[i]}`
 }
 
+const MIN_CUSTOM_INTERVAL = 7
+const MAX_CUSTOM_INTERVAL = 365
+
+function downloadRecoveryPdf(words: string[]) {
+  import('jspdf').then(({ jsPDF }) => {
+    const doc = new jsPDF()
+    doc.setFillColor('#3D4F6B')
+    doc.rect(0, 0, 210, 30, 'F')
+    doc.setTextColor('#ffffff')
+    doc.setFontSize(18)
+    doc.setFont('helvetica', 'bold')
+    doc.text('Legate — Recovery Phrase', 14, 20)
+    doc.setTextColor('#92400e')
+    doc.setFillColor('#fffbeb')
+    doc.rect(10, 36, 190, 14, 'F')
+    doc.setFontSize(9)
+    doc.setFont('helvetica', 'bold')
+    doc.text('⚠ KEEP THIS DOCUMENT SECURE. Anyone with these 24 words can access your vault.', 14, 45, { maxWidth: 182 })
+    doc.setTextColor('#0d1117')
+    doc.setFontSize(11)
+    const colW = 46, rowH = 14, startX = 14, startY = 60
+    words.forEach((word, i) => {
+      const col = i % 4, row = Math.floor(i / 4)
+      const x = startX + col * colW, y = startY + row * rowH
+      doc.setFillColor('#f1f5f9')
+      doc.roundedRect(x, y - 7, colW - 2, 12, 2, 2, 'F')
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(7)
+      doc.setTextColor('#6b7280')
+      doc.text(`${i + 1}`, x + 2, y - 1)
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(10)
+      doc.setTextColor('#0d1117')
+      doc.text(word, x + 2, y + 3)
+    })
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(8)
+    doc.setTextColor('#9ca3af')
+    doc.text(`Generated: ${new Date().toLocaleDateString()}`, 14, 175)
+    doc.save('legate-recovery-phrase.pdf')
+  }).catch(() => {
+    navigator.clipboard.writeText(words.join(' ')).catch(() => {})
+    alert('PDF export failed. Phrase copied to clipboard.')
+  })
+}
+
 export default function Security() {
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const user = useAuthStore(s => s.user)
   const { data: beneficiaries } = useBeneficiaries()
   const updateBeneficiary = useUpdateBeneficiary()
@@ -56,6 +103,30 @@ export default function Security() {
   const { data: storageUsage } = useQuery<StorageUsage>({
     queryKey: ['storage-usage'],
     queryFn: () => settingsApi.getStorageUsage().then(r => r.data),
+  })
+
+  // T11: check-in schedule
+  const { data: checkinSchedule } = useQuery<CheckinSchedule>({
+    queryKey: ['checkin-schedule'],
+    queryFn: () => settingsApi.getCheckinSchedule().then(r => r.data),
+  })
+  const [editingCheckin, setEditingCheckin] = useState(false)
+  const [editInterval, setEditInterval] = useState(30)
+  const [editGrace, setEditGrace] = useState(7)
+  const [editIntervalCustom, setEditIntervalCustom] = useState(false)
+  const [checkinSaving, setCheckinSaving] = useState(false)
+  const [checkinMsg, setCheckinMsg] = useState<string | null>(null)
+
+  const updateCheckin = useMutation({
+    mutationFn: (d: { interval_days: number; grace_period_days: number }) =>
+      settingsApi.updateCheckinSchedule(d),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['checkin-schedule'] })
+      setEditingCheckin(false)
+      setCheckinMsg('Check-in schedule updated.')
+      setTimeout(() => setCheckinMsg(null), 3000)
+    },
+    onError: () => setCheckinMsg('Failed to update. Try again.'),
   })
   const storagePercent = storageUsage && storageUsage.limit_bytes > 0
     ? Math.min(100, (storageUsage.total_bytes / storageUsage.limit_bytes) * 100)
@@ -304,6 +375,117 @@ export default function Security() {
             )}
           </div>
         )}
+
+        {/* T11: Check-in Schedule */}
+        <div className="bg-white rounded-2xl shadow-md p-6 mb-8">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <Clock className="w-5 h-5 text-[#3D4F6B]" />
+              <h3 className="font-semibold text-[#0D1117]">Check-in Schedule</h3>
+            </div>
+            {!editingCheckin && (
+              <button
+                onClick={() => {
+                  setEditInterval(checkinSchedule?.interval_days ?? 30)
+                  setEditGrace(checkinSchedule?.grace_period_days ?? 7)
+                  setEditIntervalCustom(false)
+                  setEditingCheckin(true)
+                }}
+                className="text-sm text-[#3D4F6B] hover:underline font-medium"
+              >
+                Edit
+              </button>
+            )}
+          </div>
+
+          {!editingCheckin ? (
+            <div className="space-y-2">
+              <p className="text-sm text-[#6B7280]">
+                Check-in interval: <strong className="text-[#0D1117]">{checkinSchedule?.interval_days ?? '—'} days</strong>
+              </p>
+              <p className="text-sm text-[#6B7280]">
+                Grace period: <strong className="text-[#0D1117]">{checkinSchedule?.grace_period_days ?? '—'} days</strong>
+              </p>
+              {checkinMsg && <p className="text-sm text-green-600">{checkinMsg}</p>}
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div>
+                <p className="text-sm font-semibold text-[#0D1117] mb-2">Interval (days)</p>
+                <div className="grid grid-cols-3 gap-2 mb-2">
+                  {[7, 14, 30, 60].map(d => (
+                    <button
+                      key={d}
+                      onClick={() => { setEditInterval(d); setEditIntervalCustom(false) }}
+                      className={`py-2 rounded-xl text-sm font-semibold border-2 transition-colors ${
+                        !editIntervalCustom && editInterval === d
+                          ? 'border-[#3D4F6B] bg-[#3D4F6B] text-white'
+                          : 'border-gray-200 text-[#6B7280] hover:border-gray-300'
+                      }`}
+                    >
+                      {d}d
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => setEditIntervalCustom(true)}
+                    className={`py-2 rounded-xl text-sm font-semibold border-2 transition-colors ${
+                      editIntervalCustom
+                        ? 'border-[#3D4F6B] bg-[#3D4F6B] text-white'
+                        : 'border-gray-200 text-[#6B7280] hover:border-gray-300'
+                    }`}
+                  >
+                    Custom
+                  </button>
+                </div>
+                {editIntervalCustom && (
+                  <input
+                    type="number"
+                    min={MIN_CUSTOM_INTERVAL}
+                    max={MAX_CUSTOM_INTERVAL}
+                    value={editInterval}
+                    onChange={e => setEditInterval(Math.max(MIN_CUSTOM_INTERVAL, Math.min(MAX_CUSTOM_INTERVAL, Number(e.target.value))))}
+                    className="input-field w-full"
+                    placeholder={`${MIN_CUSTOM_INTERVAL}–${MAX_CUSTOM_INTERVAL} days`}
+                  />
+                )}
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-[#0D1117] mb-2">Grace Period (days)</p>
+                <div className="grid grid-cols-4 gap-2">
+                  {[3, 7, 14, 30].map(d => (
+                    <button
+                      key={d}
+                      onClick={() => setEditGrace(d)}
+                      className={`py-2 rounded-xl text-sm font-semibold border-2 transition-colors ${
+                        editGrace === d
+                          ? 'border-[#3D4F6B] bg-[#3D4F6B] text-white'
+                          : 'border-gray-200 text-[#6B7280] hover:border-gray-300'
+                      }`}
+                    >
+                      {d}d
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {checkinMsg && <p className="text-sm text-red-600">{checkinMsg}</p>}
+              <div className="flex gap-2">
+                <Button variant="secondary" onClick={() => { setEditingCheckin(false); setCheckinMsg(null) }}>
+                  Cancel
+                </Button>
+                <Button
+                  loading={checkinSaving}
+                  onClick={async () => {
+                    setCheckinSaving(true)
+                    updateCheckin.mutate({ interval_days: editInterval, grace_period_days: editGrace })
+                    setCheckinSaving(false)
+                  }}
+                >
+                  Save
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* Emergency Contact */}
         <div className="bg-white rounded-2xl shadow-md p-6 mb-8">
@@ -554,14 +736,24 @@ export default function Security() {
                 </div>
               ))}
             </div>
-            <button
-              type="button"
-              onClick={handleRegenCopy}
-              className="w-full py-2 border border-gray-200 rounded-xl text-sm font-medium text-[#3D4F6B] hover:bg-gray-50 flex items-center justify-center gap-2"
-            >
-              {regenCopied ? <CheckCircle className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
-              {regenCopied ? 'Copied!' : 'Copy to clipboard'}
-            </button>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={handleRegenCopy}
+                className="flex-1 py-2 border border-gray-200 rounded-xl text-sm font-medium text-[#3D4F6B] hover:bg-gray-50 flex items-center justify-center gap-2"
+              >
+                {regenCopied ? <CheckCircle className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
+                {regenCopied ? 'Copied!' : 'Copy'}
+              </button>
+              <button
+                type="button"
+                onClick={() => downloadRecoveryPdf(regenWords)}
+                className="flex-1 py-2 border border-gray-200 rounded-xl text-sm font-medium text-[#3D4F6B] hover:bg-gray-50 flex items-center justify-center gap-2"
+              >
+                <FileDown className="w-4 h-4" />
+                Download PDF
+              </button>
+            </div>
             <label className="flex items-start gap-3 cursor-pointer">
               <input
                 type="checkbox"

@@ -3,6 +3,8 @@ Check-in token redemption routes.
 Unauthenticated — accessed directly from email links.
 """
 
+import html as html_mod
+
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -44,8 +46,14 @@ h1{{color:#c62828}}p{{color:#555}}</style></head>
 
 
 def _error_page(title: str, message: str, status_code: int = 400) -> HTMLResponse:
+    """Render a user-facing error page.  S5: title and message are HTML-escaped
+    before interpolation to prevent any future refactor from introducing XSS via
+    exception detail strings that happen to contain HTML."""
     return HTMLResponse(
-        content=_ERROR_HTML.format(title=title, message=message),
+        content=_ERROR_HTML.format(
+            title=html_mod.escape(title),
+            message=html_mod.escape(message),
+        ),
         status_code=status_code,
     )
 

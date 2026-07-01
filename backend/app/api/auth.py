@@ -5,7 +5,7 @@ Authentication routes: signup, login, logout, token refresh, email verification.
 import base64
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -27,6 +27,9 @@ from app.services.auth_service import AuthService
 
 router = APIRouter()
 
+# T7: Rate limiting — strict buckets for auth endpoints
+from app.core.ratelimit import limiter
+
 
 class UpdateDeliveryKeyRequest(BaseModel):
     delivery_encrypted_cek: str   # base64
@@ -34,7 +37,8 @@ class UpdateDeliveryKeyRequest(BaseModel):
 
 
 @router.post("/signup", status_code=status.HTTP_201_CREATED)
-async def signup(body: SignupRequest, db: AsyncSession = Depends(get_db_session)):
+@limiter.limit("5/minute")
+async def signup(request: Request, body: SignupRequest, db: AsyncSession = Depends(get_db_session)):
     svc = AuthService(db)
     result = await svc.signup(
         email=body.email,
@@ -50,19 +54,22 @@ async def signup(body: SignupRequest, db: AsyncSession = Depends(get_db_session)
 
 
 @router.post("/verify-email", status_code=status.HTTP_200_OK, response_model=TokenResponse)
-async def verify_email(body: VerifyEmailRequest, db: AsyncSession = Depends(get_db_session)):
+@limiter.limit("10/minute")
+async def verify_email(request: Request, body: VerifyEmailRequest, db: AsyncSession = Depends(get_db_session)):
     svc = AuthService(db)
     return await svc.verify_email(body.email, body.otp)
 
 
 @router.post("/resend-otp", status_code=status.HTTP_200_OK)
-async def resend_otp(body: ResendOtpRequest, db: AsyncSession = Depends(get_db_session)):
+@limiter.limit("5/minute")
+async def resend_otp(request: Request, body: ResendOtpRequest, db: AsyncSession = Depends(get_db_session)):
     svc = AuthService(db)
     return await svc.resend_otp(body.email)
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(body: LoginRequest, db: AsyncSession = Depends(get_db_session)):
+@limiter.limit("5/minute")
+async def login(request: Request, body: LoginRequest, db: AsyncSession = Depends(get_db_session)):
     svc = AuthService(db)
     return await svc.login(body.email, body.password)
 
@@ -111,18 +118,46 @@ async def get_encryption_key(
     )
 
 
-@router.get("/me/delivery-wrapping-key", response_model=DeliveryWrappingKeyResponse)
+@router.post("/me/delivery-wrapping-key", response_model=DeliveryWrappingKeyResponse)
+@limiter.limit("5/minute")
 async def get_delivery_wrapping_key(
+    request: Request,
+    db: AsyncSession = Depends(get_db_session),
     current_user=Depends(get_current_verified_user),
 ):
-    import hmac, hashlib
+    """Return the per-user HMAC delivery wrapping key.
+
+    Security design (S2): This key is used by the client to wrap the CEK for
+    delivery.  The key is derived as HMAC-SHA256(delivery_secret, user_id).
+    Secrecy depends entirely on DELIVERY_SECRET (see docs/SECURITY.md §S2).
+    Rotating DELIVERY_SECRET invalidates all existing delivery blobs.
+
+    Every access is audit-logged.  The endpoint is POST to prevent caching,
+    browser history exposure, and link prefetching.  Rate-limited to 5/min/IP.
+    """
+    import hmac
+    import hashlib
     from app.config import get_settings
+    from app.core.audit import write_audit
+
     cfg = get_settings()
     key = hmac.new(
         cfg.delivery_secret.encode(),
         str(current_user.id).encode(),
         hashlib.sha256,
     ).hexdigest()
+
+    ip = request.client.host if request.client else None
+    await write_audit(
+        db,
+        "delivery_wrapping_key_accessed",
+        user_id=current_user.id,
+        resource_type="encryption_key",
+        description="Delivery wrapping key retrieved",
+        ip_address=ip,
+    )
+    await db.commit()
+
     return DeliveryWrappingKeyResponse(wrapping_key=key)
 
 
@@ -210,7 +245,8 @@ async def validate_recovery_phrase(
 
 
 @router.post("/forgot-password", status_code=status.HTTP_200_OK)
-async def forgot_password(body: ForgotPasswordRequest, db: AsyncSession = Depends(get_db_session)):
+@limiter.limit("5/minute")
+async def forgot_password(request: Request, body: ForgotPasswordRequest, db: AsyncSession = Depends(get_db_session)):
     """T6.1: send a Supabase password-reset magic link to the given email."""
     svc = AuthService(db)
     return await svc.forgot_password(body.email)

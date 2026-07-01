@@ -4,19 +4,66 @@ User settings and storage configuration routes.
 
 import uuid
 from datetime import datetime, timedelta, timezone
-from pydantic import BaseModel
+from typing import Optional
+from pydantic import BaseModel, Field
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
 from app.db.session import get_db_session
-from app.dependencies import get_current_verified_user
+from app.dependencies import get_current_verified_user, require_active_user
 from app.db.models.checkin import CheckInSchedule
 from app.db.models.capsule import MediaAttachment, Capsule
+from app.db.models.user import UserSettings
 from app.schemas.checkin import CheckInSettingsUpdate, CheckInSettingsResponse
 
 router = APIRouter()
+
+
+class UserSettingsPatch(BaseModel):
+    """T5 (Phase 4): patch general user settings — wizard step, onboarding flag."""
+    setup_step: Optional[int] = Field(None, ge=1, le=4)
+    needs_onboarding: Optional[bool] = None
+
+
+class UserSettingsResponse(BaseModel):
+    setup_step: Optional[int] = None
+    needs_onboarding: bool
+
+    model_config = {"from_attributes": True}
+
+
+@router.get("/", response_model=UserSettingsResponse)
+async def get_user_settings(
+    db: AsyncSession = Depends(get_db_session),
+    current_user=Depends(get_current_verified_user),
+):
+    settings_row = current_user.settings
+    if not settings_row:
+        return UserSettingsResponse(setup_step=None, needs_onboarding=True)
+    return UserSettingsResponse.model_validate(settings_row)
+
+
+@router.patch("/", response_model=UserSettingsResponse)
+async def patch_user_settings(
+    body: UserSettingsPatch,
+    db: AsyncSession = Depends(get_db_session),
+    current_user=Depends(require_active_user),
+):
+    """T5 (Phase 4): persist wizard step + onboarding flag."""
+    settings_row: UserSettings | None = current_user.settings
+    if not settings_row:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Settings not found")
+
+    if body.setup_step is not None:
+        settings_row.setup_step = body.setup_step
+    if body.needs_onboarding is not None:
+        settings_row.needs_onboarding = body.needs_onboarding
+
+    await db.commit()
+    return UserSettingsResponse.model_validate(settings_row)
 
 
 class StorageCapsuleBreakdown(BaseModel):
@@ -51,7 +98,7 @@ async def get_checkin_settings(
 async def update_checkin_settings(
     body: CheckInSettingsUpdate,
     db: AsyncSession = Depends(get_db_session),
-    current_user=Depends(get_current_verified_user),
+    current_user=Depends(require_active_user),
 ):
     result = await db.execute(
         select(CheckInSchedule).where(CheckInSchedule.user_id == current_user.id)

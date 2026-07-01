@@ -23,29 +23,75 @@ from app.db.models.checkin import CheckInSchedule
 TEST_PASSWORD = "TestPassword123!"
 TEST_EMAIL_PREFIX = "e2etest_"
 
-# ── Session-scoped NullPool engine to avoid asyncpg "event loop closed" errors ─
+# ── Patch asyncpg.connect with EAUTHTIMEOUT retry ────────────────────────────
+# asyncpg has a hardcoded ~10 s auth-challenge timeout inside its C protocol
+# layer (separate from the Python-level `timeout=` parameter). When Supabase's
+# PgBouncer is saturated — typically because uvicorn workers and the Celery
+# worker are all holding connections — it accepts the TCP handshake but delays
+# the auth challenge beyond 10 s, raising ConnectionFailureError(EAUTHTIMEOUT).
+# Patching asyncpg.connect with retry+backoff gives PgBouncer time to drain
+# its queue without crashing the test run.
+import asyncpg as _asyncpg
+_orig_asyncpg_connect = _asyncpg.connect
+
+
+async def _asyncpg_connect_with_retry(*args, **kwargs):
+    from asyncpg.exceptions import (
+        ConnectionFailureError as _CFE,
+        InternalServerError as _ISE,
+    )
+    # ConnectionAbortedError is raised by asyncpg when the SSL handshake
+    # times out (60 s asyncio limit) — distinct from EAUTHTIMEOUT but
+    # caused by the same root problem: PgBouncer saturation on the free tier.
+    # InternalServerError(EMAXCONNSESSION) is raised when the PgBouncer
+    # session-mode pool is full (15-slot free-tier limit). Stale connections
+    # from container restarts can saturate the pool transiently; retrying with
+    # backoff gives Supabase time to reclaim the slots.
+    last_exc = None
+    for _attempt in range(4):
+        try:
+            return await _orig_asyncpg_connect(*args, **kwargs)
+        except (_CFE, ConnectionAbortedError, ConnectionResetError, OSError) as _exc:
+            last_exc = _exc
+            if _attempt < 3:
+                await asyncio.sleep(10 * (_attempt + 1))   # 10 s, 20 s, 30 s
+        except _ISE as _exc:
+            _msg = str(_exc)
+            if "EMAXCONNSESSION" in _msg or "max clients" in _msg.lower():
+                last_exc = _exc
+                if _attempt < 3:
+                    await asyncio.sleep(15 * (_attempt + 1))  # 15 s, 30 s, 45 s
+            else:
+                raise
+    raise last_exc
+
+
+_asyncpg.connect = _asyncpg_connect_with_retry
+
+# ── Test engine (NullPool) ───────────────────────────────────────────────────
 
 _cfg = get_settings()
 _test_engine = create_async_engine(
     _cfg.database_url.replace("postgresql://", "postgresql+asyncpg://"),
-    poolclass=NullPool,
+    poolclass=NullPool,    # NullPool: fresh asyncpg connection per checkout, discarded on return.
+                           # AsyncAdaptedQueuePool causes "Future attached to a different loop":
+                           # its cached connections bind their internal Futures to whatever loop
+                           # was running at creation time (e.g. test_01 health test), but
+                           # Starlette's BaseHTTPMiddleware call_next TaskGroup runs the handler
+                           # as a new asyncio Task whose loop asyncpg sees as "different".
+                           # NullPool avoids all of that — no persistent async state across reqs.
+                           # EAUTHTIMEOUT from PgBouncer saturation is handled by the
+                           # asyncpg.connect monkey-patch above (4 retries, 10/20/30 s backoff).
     echo=False,
+    connect_args={"timeout": 120},
 )
 AsyncSessionLocal = async_sessionmaker(_test_engine, expire_on_commit=False, class_=AsyncSession)
 
 
 # ── Patch app.db.session for worker-task code paths ──────────────────────────
-# Worker task functions (checkin_tasks/delivery_tasks/cleanup_tasks) do
-# `from app.db.session import AsyncSessionLocal` and use the module-level
-# `engine`, which is built once at import time with the default pooled
-# AsyncAdaptedQueuePool + pool_pre_ping. asyncpg connections are bound to the
-# event loop active when they're created; pytest-asyncio gives each test
-# function its own loop, so a pooled connection created under one test's loop
-# raises "Future attached to a different loop" (and isn't recoverable via
-# pre_ping, since that RuntimeError isn't classified as a disconnect) when
-# reused under another test's loop. Point worker-task code at this session's
-# NullPool engine too — NullPool opens/closes a fresh connection per checkout,
-# so there is never a cross-loop reuse.
+# Worker task functions (checkin_tasks/delivery_tasks/cleanup_tasks) import
+# AsyncSessionLocal from app.db.session. Override it to use the test engine so
+# all DB operations in the test process share the same pool and event loop.
 import app.db.session as _db_session_module  # noqa: E402
 
 _db_session_module.engine = _test_engine
@@ -83,10 +129,14 @@ def make_test_email() -> str:
 def event_loop():
     loop = asyncio.new_event_loop()
     yield loop
+    # Dispose pooled connections before closing the loop so asyncpg can send
+    # proper close frames. Without this, asyncpg logs "Future is not running"
+    # warnings when the loop closes while connections are still in the pool.
+    loop.run_until_complete(_test_engine.dispose())
     loop.close()
 
 
-# ── Override app DB session to use NullPool engine ───────────────────────────
+# ── Override app DB session to use the test engine ───────────────────────────
 
 async def _override_db():
     async with AsyncSessionLocal() as session:
@@ -133,18 +183,57 @@ def _make_admin_client():
     return create_client(cfg.supabase_url, cfg.supabase_service_role_key)
 
 
+def _admin_call(fn, *args, max_attempts: int = 4, **kwargs):
+    """Call a synchronous Supabase admin API function with retry on AuthRetryableError.
+
+    Supabase free-tier admin endpoints (list_users, update_user_by_id, create_user)
+    can return a retryable 5xx transiently during high load. Retrying with
+    increasing backoff avoids spurious fixture failures.
+    """
+    import time
+    from gotrue.errors import AuthRetryableError
+    last_exc = None
+    for attempt in range(max_attempts):
+        try:
+            return fn(*args, **kwargs)
+        except AuthRetryableError as exc:
+            last_exc = exc
+            if attempt < max_attempts - 1:
+                time.sleep(10 * (attempt + 1))   # 10 s, 20 s, 30 s
+    raise last_exc
+
+
 async def _create_user_via_admin(email: str, password: str) -> None:
     """
     Rate-limit fallback: create Supabase Auth user + local DB rows directly
     via the admin API, bypassing the signup endpoint and email sending.
     """
     sb = _make_admin_client()
-    admin_resp = sb.auth.admin.create_user({
-        "email": email,
-        "password": password,
-        "email_confirm": True,
-    })
-    supabase_uid = admin_resp.user.id
+    try:
+        admin_resp = _admin_call(sb.auth.admin.create_user, {
+            "email": email,
+            "password": password,
+            "email_confirm": True,
+        })
+        supabase_uid = admin_resp.user.id
+    except Exception as e:
+        if "already been registered" not in str(e):
+            raise
+        # 503 from signup can mean Supabase created the user before timing out.
+        # Find the existing UID and fall through to ensure local DB rows exist.
+        users_page = _admin_call(sb.auth.admin.list_users)
+        existing = next((u for u in users_page if u.email == email), None)
+        if not existing:
+            raise
+        supabase_uid = existing.id
+        # If local DB already has this user, nothing more to do.
+        async with AsyncSessionLocal() as db:
+            from sqlalchemy import select as _select
+            already = (await db.execute(
+                _select(User).where(User.email == email)
+            )).scalar_one_or_none()
+            if already:
+                return
     now = datetime.now(timezone.utc)
     async with AsyncSessionLocal() as db:
         user = User(
@@ -193,16 +282,16 @@ async def registered_user(http):
         "delivery_cek_iv": _SIGNUP_DIV,
     })
 
-    if res.status_code == 429:
-        # Email rate-limited: create user directly via Supabase admin API
+    if res.status_code in (429, 503):
+        # Rate-limited or Supabase auth timeout: create via admin API (no email send).
         await _create_user_via_admin(email, password)
     else:
         assert res.status_code == 201, f"Signup failed: {res.text}"
         sb = _make_admin_client()
-        sb_users = sb.auth.admin.list_users()
+        sb_users = _admin_call(sb.auth.admin.list_users)
         sb_user = next((u for u in sb_users if u.email == email), None)
         assert sb_user, f"User {email} not found in Supabase Auth"
-        sb.auth.admin.update_user_by_id(sb_user.id, {"email_confirm": True})
+        _admin_call(sb.auth.admin.update_user_by_id, sb_user.id, {"email_confirm": True})
         async with AsyncSessionLocal() as db:
             result = await db.execute(select(User).where(User.email == email))
             user = result.scalar_one()
@@ -215,8 +304,18 @@ async def registered_user(http):
                 schedule.next_dispatch_at = datetime.now(timezone.utc) + timedelta(days=30)
             await db.commit()
 
-    login_res = await http.post("/auth/login", json={"email": email, "password": password})
-    assert login_res.status_code == 200, f"Login failed: {login_res.text}"
+    # Retry login with backoff — Supabase takes a moment to propagate email
+    # confirmation (or admin user creation) before sign_in_with_password works.
+    login_res = None
+    for _attempt in range(5):
+        login_res = await http.post("/auth/login", json={"email": email, "password": password})
+        if login_res.status_code == 200:
+            break
+        if _attempt < 4:
+            await asyncio.sleep(5 * (_attempt + 1))  # 5 s, 10 s, 15 s, 20 s
+    assert login_res is not None and login_res.status_code == 200, (
+        f"Login failed after retries: {login_res.text if login_res else 'no response'}"
+    )
     data = login_res.json()
 
     return {

@@ -51,6 +51,9 @@ class UserSettings(Base, TimestampMixin):
     snooze_count_remaining: MappedColumn[int] = mapped_column(Integer, default=2)
     preferred_language: MappedColumn[str] = mapped_column(String(8), default="en")
     needs_onboarding: MappedColumn[bool] = mapped_column(Boolean, default=True)
+    # T5 (Phase 4): wizard step the user last completed (1=checkin,2=beneficiary,3=capsule,4=recovery).
+    # NULL means wizard not yet started; 4 means complete.
+    setup_step: MappedColumn[int | None] = mapped_column(Integer, nullable=True)
     last_check_in_at: MappedColumn[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     next_check_in_at: MappedColumn[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

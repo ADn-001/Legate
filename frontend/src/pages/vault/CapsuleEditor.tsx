@@ -1,7 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, AlertTriangle } from 'lucide-react'
+import { ArrowLeft, AlertTriangle, Bold, Italic, List, Eye } from 'lucide-react'
+import { useEditor, EditorContent } from '@tiptap/react'
+import StarterKit from '@tiptap/starter-kit'
+import CharacterCount from '@tiptap/extension-character-count'
 import { capsulesApi } from '../../api/capsules'
 import { useBeneficiaries } from '../../hooks/useBeneficiaries'
 import { useAuthStore } from '../../store/auth'
@@ -9,11 +12,15 @@ import { useCryptoStore } from '../../store/crypto'
 import { requireCek } from '../../store/unlock'
 import { capsuleEncryption, bytesToHex, hexToBytes } from '../../crypto/capsule'
 import { toBase64, fromBase64 } from '../../crypto/keys'
-import { mediaEncryption } from '../../crypto/media'
 import { uploadEncryptedBlob, downloadEncryptedBlob } from '../../utils/storage'
+import { uploadSingleMedia } from '../../utils/media-upload'
 import MediaUploader from '../../components/capsule/MediaUploader'
+import DeliveryPreviewModal from '../../components/capsule/DeliveryPreviewModal'
+import type { MediaAttachment } from '../../types/api'
 import SecurityBanner from '../../components/ui/SecurityBanner'
 import Button from '../../components/ui/Button'
+
+const MAX_CHARS = 10000
 
 type AutoSaveStatus = 'saved' | 'saving' | 'unsaved'
 
@@ -56,7 +63,11 @@ export default function CapsuleEditor() {
   const [title, setTitle] = useState('')
   const [message, setMessage] = useState('')
   const [beneficiaryId, setBeneficiaryId] = useState('')
-  const [files, setFiles] = useState<File[]>([])
+  const [pendingFiles, setPendingFiles] = useState<File[]>([])
+  const [showPreview, setShowPreview] = useState(false)
+  // Ref holds content that arrives before the tiptap editor is mounted
+  const pendingContentRef = useRef<string | null>(null)
+  const [attachments, setAttachments] = useState<MediaAttachment[]>([])
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(isEdit)
   const [autoSaveStatus, setAutoSaveStatus] = useState<AutoSaveStatus>('unsaved')
@@ -67,6 +78,37 @@ export default function CapsuleEditor() {
   const cek = useCryptoStore(s => s.cek)
   const locked = useCryptoStore(s => s.locked)
   const { data: beneficiaries } = useBeneficiaries()
+
+  // T9/Phase 4: tiptap rich-text editor (StarterKit + CharacterCount)
+  // onUpdate keeps `message` state in sync. onCreate applies any content
+  // that arrived via setEditorContent before the editor was mounted.
+  const editor = useEditor({
+    extensions: [
+      StarterKit,
+      CharacterCount.configure({ limit: MAX_CHARS }),
+    ],
+    content: '',
+    onUpdate: ({ editor }) => {
+      setMessage(editor.getHTML())
+    },
+    onCreate: ({ editor }) => {
+      if (pendingContentRef.current !== null) {
+        editor.commands.setContent(pendingContentRef.current, false)
+        pendingContentRef.current = null
+      }
+    },
+  })
+
+  /** Set editor content from async data loads. If the editor isn't ready yet,
+   *  store in pendingContentRef for the onCreate callback. */
+  const setEditorContent = useCallback((content: string) => {
+    setMessage(content)
+    if (editor) {
+      editor.commands.setContent(content, false)
+    } else {
+      pendingContentRef.current = content
+    }
+  }, [editor])
 
   // T9 (F10): tracks the last persisted {title, message, beneficiaryId} so
   // the "saved"/"unsaved" indicator reflects real dirty state, not a timer.
@@ -88,7 +130,7 @@ export default function CapsuleEditor() {
         const draft = await decryptDraft(raw, activeCek)
         if (draft) {
           setTitle(draft.title)
-          setMessage(draft.message)
+          setEditorContent(draft.message)
           setBeneficiaryId(draft.beneficiaryId)
           savedSnapshotRef.current = draft
         }
@@ -117,6 +159,7 @@ export default function CapsuleEditor() {
         setTitle(loadedTitle)
         setBeneficiaryId(loadedBeneficiaryId)
         setContentUnrecoverable(!!capsule.content_unrecoverable)
+        setAttachments(capsule.media_attachments || [])
 
         if (capsule.storage_object_path && capsule.cipher_iv && !capsule.content_unrecoverable) {
           const activeCek = await requireCek()
@@ -124,7 +167,7 @@ export default function CapsuleEditor() {
           const encrypted = await downloadEncryptedBlob(contentData.url)
           const iv = hexToBytes(capsule.cipher_iv)
           loadedMessage = await capsuleEncryption.decrypt(new Uint8Array(encrypted), activeCek, iv)
-          if (!cancelled) setMessage(loadedMessage)
+          if (!cancelled) setEditorContent(loadedMessage)
         }
 
         if (!cancelled) {
@@ -208,6 +251,8 @@ export default function CapsuleEditor() {
       const { ciphertext, iv } = await capsuleEncryption.encrypt(message, activeCek)
       const cipherIvHex = bytesToHex(iv)
 
+      let newCapsuleId: string | null = null
+
       if (isEdit && id) {
         // T5 (F5): re-encrypt and upload via the backend (server-side PUT to
         // Supabase Storage), then PATCH the capsule — never create a duplicate.
@@ -227,22 +272,25 @@ export default function CapsuleEditor() {
           beneficiary_id: beneficiaryId,
           cipher_iv: cipherIvHex,
         })
-        const { id: capsuleId, upload_url } = data
+        const { id: createdId, upload_url } = data
+        newCapsuleId = String(createdId)
 
         await uploadEncryptedBlob(upload_url, new Blob([ciphertext]))
-        await capsulesApi.update(capsuleId, {
-          storage_object_path: `${user!.id}/${capsuleId}/content.enc`,
+        await capsulesApi.update(createdId, {
+          storage_object_path: `${user!.id}/${createdId}/content.enc`,
           content_size_bytes: ciphertext.byteLength,
         })
       }
 
-      // Media upload stub — requires B4 backend endpoint
-      if (files.length > 0) {
-        for (const file of files) {
-          // eslint-disable-next-line @typescript-eslint/no-unused-vars
-          const { encryptedBlob: _blob, iv: _iv } = await mediaEncryption.encrypt(file, activeCek)
-          // TODO: POST /capsules/{capsuleId}/media → get upload_url → PUT encryptedBlob
-          // This requires the B4 backend endpoint to be implemented first.
+      // Upload pending media files (create mode only; edit mode uploads immediately via MediaUploader)
+      if (!isEdit && newCapsuleId && pendingFiles.length > 0) {
+        for (const file of pendingFiles) {
+          try {
+            const attachment = await uploadSingleMedia(newCapsuleId, file, activeCek)
+            setAttachments(prev => [...prev, attachment])
+          } catch {
+            // Non-blocking: capsule is saved; individual media failure doesn't abort navigation
+          }
         }
       }
 
@@ -303,9 +351,18 @@ export default function CapsuleEditor() {
           )}
           <div className="flex items-center justify-between mb-4">
             <h2 className="font-semibold text-[#0D1117]">CONTENT</h2>
-            <span className={`text-xs ${autoSaveStatus === 'saved' ? 'text-green-600' : 'text-gray-400'}`}>
-              {autoSaveStatus === 'saved' ? '✓ Draft saved' : autoSaveStatus === 'saving' ? 'Saving...' : ''}
-            </span>
+            <div className="flex items-center gap-3">
+              <span className={`text-xs ${autoSaveStatus === 'saved' ? 'text-green-600' : 'text-gray-400'}`}>
+                {autoSaveStatus === 'saved' ? '✓ Draft saved' : autoSaveStatus === 'saving' ? 'Saving...' : ''}
+              </span>
+              <button
+                onClick={() => setShowPreview(true)}
+                className="flex items-center gap-1 text-xs text-[#3D4F6B] hover:text-[#2a3851] font-medium"
+              >
+                <Eye className="w-3.5 h-3.5" />
+                Preview
+              </button>
+            </div>
           </div>
 
           <div className="space-y-4">
@@ -322,15 +379,46 @@ export default function CapsuleEditor() {
 
             <div>
               <label className="block text-sm font-semibold text-[#0D1117] mb-2">MESSAGE</label>
-              <textarea
-                value={message}
-                onChange={e => setMessage(e.target.value)}
-                placeholder="Write your message here..."
-                rows={8}
-                maxLength={10000}
-                className="input-field w-full resize-none"
-              />
-              <p className="text-xs text-[#6B7280] text-right mt-1">{message.length}/10000</p>
+              {/* T9/Phase 4: tiptap rich text editor */}
+              <div className="border border-gray-200 rounded-xl overflow-hidden focus-within:border-[#3D4F6B] transition-colors">
+                {/* Toolbar */}
+                <div className="flex gap-1 p-2 border-b border-gray-100 bg-gray-50">
+                  <button
+                    type="button"
+                    onClick={() => editor?.chain().focus().toggleBold().run()}
+                    className={`p-1.5 rounded text-sm transition-colors ${editor?.isActive('bold') ? 'bg-[#3D4F6B] text-white' : 'text-gray-600 hover:bg-gray-200'}`}
+                    title="Bold"
+                    aria-label="Bold"
+                  >
+                    <Bold className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => editor?.chain().focus().toggleItalic().run()}
+                    className={`p-1.5 rounded text-sm transition-colors ${editor?.isActive('italic') ? 'bg-[#3D4F6B] text-white' : 'text-gray-600 hover:bg-gray-200'}`}
+                    title="Italic"
+                    aria-label="Italic"
+                  >
+                    <Italic className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => editor?.chain().focus().toggleBulletList().run()}
+                    className={`p-1.5 rounded text-sm transition-colors ${editor?.isActive('bulletList') ? 'bg-[#3D4F6B] text-white' : 'text-gray-600 hover:bg-gray-200'}`}
+                    title="Bullet list"
+                    aria-label="Bullet list"
+                  >
+                    <List className="w-4 h-4" />
+                  </button>
+                </div>
+                <EditorContent
+                  editor={editor}
+                  className="prose prose-sm max-w-none p-3 min-h-[200px] text-[#0D1117] focus:outline-none [&_.ProseMirror]:outline-none [&_.ProseMirror]:min-h-[200px] [&_.ProseMirror_p.is-editor-empty:first-child::before]:content-['Write_your_message_here...'] [&_.ProseMirror_p.is-editor-empty:first-child::before]:text-gray-400 [&_.ProseMirror_p.is-editor-empty:first-child::before]:float-left [&_.ProseMirror_p.is-editor-empty:first-child::before]:pointer-events-none"
+                />
+              </div>
+              <p className="text-xs text-[#6B7280] text-right mt-1">
+                {editor?.storage.characterCount?.characters() ?? 0}/{MAX_CHARS}
+              </p>
             </div>
           </div>
         </div>
@@ -338,10 +426,15 @@ export default function CapsuleEditor() {
         {/* Media Section */}
         <div className="bg-white rounded-2xl shadow-md p-6 mb-4">
           <h2 className="font-semibold text-[#0D1117] mb-4">MEDIA ATTACHMENTS</h2>
-          <MediaUploader files={files} onFilesChange={setFiles} />
-          <p className="text-xs text-amber-600 mt-2">
-            Note: Media uploads require a pending backend endpoint. Files will be encrypted but not uploaded until B4 is implemented.
-          </p>
+          <MediaUploader
+            capsuleId={isEdit && id ? id : null}
+            cek={cek}
+            attachments={attachments}
+            onAttachmentAdded={(a) => setAttachments(prev => [...prev, a])}
+            onAttachmentDeleted={(aid) => setAttachments(prev => prev.filter(a => a.id !== aid))}
+            pendingFiles={pendingFiles}
+            onPendingFilesChange={setPendingFiles}
+          />
         </div>
 
         {/* Beneficiary Section */}
@@ -378,6 +471,17 @@ export default function CapsuleEditor() {
           {isEdit ? 'Update Capsule' : 'Save Capsule'}
         </Button>
       </div>
+
+      {/* T3: Delivery preview modal */}
+      <DeliveryPreviewModal
+        isOpen={showPreview}
+        onClose={() => setShowPreview(false)}
+        title={title}
+        message={message}
+        senderName={user?.full_name || user?.email || ''}
+        attachments={attachments}
+        pendingFiles={pendingFiles}
+      />
     </div>
   )
 }

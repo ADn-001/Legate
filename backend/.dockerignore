@@ -1,8 +1,7 @@
 .venv
 venv
-tests/
 scripts/
-celerybeat-schedule
+celerybeat-schedule*
 __pycache__/
 *.pyc
 .env

@@ -102,3 +102,21 @@ async def get_current_verified_user(
             detail="Email address not verified.",
         )
     return current_user
+
+
+async def require_active_user(
+    current_user: User = Depends(get_current_verified_user),
+) -> User:
+    """T12 (Phase 4): reject mutations from memorialized accounts.
+
+    Use this dependency on every mutating endpoint (create/edit/delete capsule,
+    beneficiary mutations, settings mutations). Read-only endpoints may still
+    use get_current_verified_user.
+    """
+    from app.db.models.user import UserStatus
+    if current_user.status == UserStatus.memorialized:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is memorialized. No further changes are permitted.",
+        )
+    return current_user

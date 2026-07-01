@@ -174,7 +174,9 @@ async def _run_delivery(trigger_id: str, attempt: int):
                         cek=cek,
                         supabase=supabase,
                         cfg=cfg,
-                        media_html=await _render_capsule_media(db, capsule, cfg),
+                        media_html=await _render_capsule_media(
+                            db, capsule, cek, str(trigger.id), cfg
+                        ),
                     ))
                 capsules_html = "".join(sections)
 
@@ -217,7 +219,7 @@ async def _run_delivery(trigger_id: str, attempt: int):
             user.status = UserStatus.memorialized
             await write_audit(db, "delivery_completed", user_id=user.id, resource_id=trigger.id)
             await db.commit()
-            _schedule_post_delivery_purge(str(user.id))
+            _schedule_post_delivery_purge(str(user.id), str(trigger.id))
         elif attempt < MAX_DELIVERY_ATTEMPTS:
             # Do NOT mark completed; schedule a retry for failed recipients only.
             await db.commit()
@@ -252,16 +254,44 @@ async def _run_delivery(trigger_id: str, attempt: int):
                     )
                 except Exception:
                     pass
-            _schedule_post_delivery_purge(str(user.id))
+            _schedule_post_delivery_purge(str(user.id), str(trigger.id))
 
 
-def _schedule_post_delivery_purge(user_id: str):
+def _schedule_post_delivery_purge(user_id: str, trigger_id: str):
     from app.worker.tasks.cleanup_tasks import purge_user_storage
-    purge_user_storage.apply_async(args=[user_id], countdown=PURGE_COUNTDOWN_SECONDS)
+    purge_user_storage.apply_async(
+        args=[user_id],
+        kwargs={"trigger_id": trigger_id},
+        countdown=PURGE_COUNTDOWN_SECONDS,
+    )
+
+
+_BLEACH_TAGS = ["b", "strong", "i", "em", "ul", "ol", "li", "p", "br", "h1", "h2", "h3"]
+_BLEACH_ATTRS: dict = {}
+
+
+def _sanitize_html(text: str) -> str:
+    """T9 (Phase 4): sanitize decrypted capsule content as HTML.
+    If it looks like plain text (no tags), convert newlines to <br> then sanitize.
+    If it looks like rich HTML (from tiptap), sanitize directly.
+    """
+    try:
+        import bleach
+        stripped = text.strip()
+        if stripped.startswith("<"):
+            # Rich text from tiptap — sanitize and allow the allowlist tags
+            return bleach.clean(stripped, tags=_BLEACH_TAGS, attributes=_BLEACH_ATTRS)
+        else:
+            # Legacy plain text — convert newlines then sanitize
+            escaped = html_mod.escape(stripped).replace("\n", "<br>")
+            return bleach.clean(escaped, tags=["br"], attributes={})
+    except ImportError:
+        # bleach not installed — fall back to html.escape (safe, no rich text)
+        return html_mod.escape(text).replace("\n", "<br>")
 
 
 def _build_capsule_html(capsule, cek: bytes, supabase, cfg, media_html: str = "") -> str:
-    """Render one capsule section: escaped title + decrypted, escaped text + media."""
+    """Render one capsule section: escaped title + decrypted, sanitized content + media."""
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
     parts = [f"<h3>{html_mod.escape(capsule.title or '')}</h3>"]
@@ -275,10 +305,9 @@ def _build_capsule_html(capsule, cek: bytes, supabase, cfg, media_html: str = ""
                 gcm = AESGCM(cek)
                 plaintext = gcm.decrypt(capsule.cipher_iv, encrypted, None)
                 text = plaintext.decode("utf-8", errors="replace")
-                # html.escape now (T9.4); upgraded to sanitization in Phase 5
-                # when rich text lands (S3).
-                escaped = html_mod.escape(text).replace("\n", "<br>")
-                parts.append(f"<p>{escaped}</p>")
+                # T9.4: sanitize with bleach allowlist; Phase 5 S3 extends/verifies.
+                sanitized = _sanitize_html(text)
+                parts.append(f"<div class='capsule-body'>{sanitized}</div>")
         except Exception:
             parts.append("<p><em>[Content could not be decrypted]</em></p>")
 
@@ -288,13 +317,47 @@ def _build_capsule_html(capsule, cek: bytes, supabase, cfg, media_html: str = ""
     return "".join(parts)
 
 
-async def _render_capsule_media(db, capsule, cfg) -> str:
+def _decrypt_media_blob(encrypted: bytes, cek: bytes, cipher_iv: bytes) -> bytes:
+    """Decrypt a media blob. cipher_iv bytes are either raw 12-byte photo IV or
+    UTF-8 JSON metadata for chunked video."""
+    import json
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    cipher_iv_str = cipher_iv.decode("utf-8", errors="replace")
+    gcm = AESGCM(cek)
+
+    if cipher_iv_str.startswith("{"):
+        # Chunked video: repeated [12-byte IV][chunk_bytes + 16 byte ciphertext]
+        meta = json.loads(cipher_iv_str)
+        chunk_bytes: int = meta.get("chunk_bytes", 5 * 1024 * 1024)
+        parts: list[bytes] = []
+        offset = 0
+        while offset < len(encrypted):
+            if offset + 12 > len(encrypted):
+                break  # truncated IV — stop
+            iv = encrypted[offset:offset + 12]
+            remaining = len(encrypted) - offset - 12
+            # Full chunk ciphertext = chunk_bytes plaintext + 16 GCM tag
+            ct_len = min(chunk_bytes + 16, remaining)
+            ciphertext = encrypted[offset + 12:offset + 12 + ct_len]
+            parts.append(gcm.decrypt(bytes(iv), bytes(ciphertext), None))
+            offset += 12 + ct_len
+        return b"".join(parts)
+    else:
+        # Single-shot photo: cipher_iv is raw 12-byte IV
+        return gcm.decrypt(bytes(cipher_iv[:12]), encrypted, None)
+
+
+async def _render_capsule_media(db, capsule, cek: bytes, trigger_id: str, cfg) -> str:
+    """T1/Phase 4: decrypt each media attachment, upload a plaintext delivery copy
+    under deliveries/{trigger_id}/{att_id}/, sign a 30-day URL, and render HTML.
+
+    Small photos (< 200 kB plaintext) are embedded as inline data: URIs so they
+    appear directly in the email. Larger photos and all videos are gallery links.
+    Purge of the deliveries/ prefix is handled by the post-delivery cleanup task.
     """
-    FR-39 media rendering: photos embedded via 30-day signed URLs, videos as
-    30-day signed links. Renders whatever media_attachments rows exist — the
-    upload pipeline arrives in Phase 4 (G2), so this may legitimately render
-    nothing for now.
-    """
+    import base64
+    import mimetypes
     from sqlalchemy import select, and_
     from app.db.models.capsule import MediaAttachment, MediaType, MediaStatus
     from app.core.supabase import get_storage
@@ -313,26 +376,66 @@ async def _render_capsule_media(db, capsule, cfg) -> str:
 
     storage = get_storage()
     parts = ['<div class="media">']
+
     for att in attachments:
+        name = html_mod.escape(att.original_name or "attachment")
+        mime = att.mime_type or "application/octet-stream"
+        ext = mimetypes.guess_extension(mime) or ""
+
         try:
+            # 1. Download encrypted blob
+            encrypted = storage.from_(cfg.supabase_storage_bucket_media).download(
+                att.storage_object_path
+            )
+            if not encrypted:
+                continue
+
+            # 2. Decrypt in-memory using the reconstructed CEK
+            plaintext = _decrypt_media_blob(bytes(encrypted), cek, att.cipher_iv)
+
+            # 3. Upload plaintext delivery copy
+            delivery_path = f"deliveries/{trigger_id}/{att.id}/media{ext}"
+            storage.from_(cfg.supabase_storage_bucket_media).upload(
+                delivery_path,
+                plaintext,
+                {"content-type": mime, "upsert": "true"},
+            )
+
+            # 4. Sign URL (30 days)
             signed = storage.from_(cfg.supabase_storage_bucket_media).create_signed_url(
-                att.storage_object_path, SIGNED_URL_EXPIRES_SECONDS
+                delivery_path, SIGNED_URL_EXPIRES_SECONDS
             )
             url = signed.get("signedURL") or signed.get("signed_url") or ""
         except Exception:
             url = ""
+
         if not url:
             continue
 
-        name = html_mod.escape(att.original_name or "attachment")
         if att.type == MediaType.photo:
-            parts.append(
-                f'<p><img src="{url}" alt="{name}" style="max-width:100%;border-radius:6px">'
-                f'<br><a href="{url}">{name}</a> (link valid 30 days)</p>'
-            )
+            # Inline small photos as data URIs; larger ones as gallery links
+            try:
+                if len(plaintext) < 200_000:
+                    b64 = base64.b64encode(plaintext).decode()
+                    parts.append(
+                        f'<p><img src="data:{mime};base64,{b64}" alt="{name}" '
+                        f'style="max-width:100%;border-radius:6px"><br>'
+                        f'<a href="{url}">{name}</a> (download, valid 30 days)</p>'
+                    )
+                else:
+                    parts.append(
+                        f'<p><img src="{url}" alt="{name}" style="max-width:100%;border-radius:6px">'
+                        f'<br><a href="{url}">{name}</a> (link valid 30 days)</p>'
+                    )
+            except Exception:
+                parts.append(
+                    f'<p><a href="{url}">{name}</a> (photo, link valid 30 days)</p>'
+                )
         else:
             parts.append(
-                f'<p>&#x1F3A5; <a href="{url}">{name}</a> &mdash; video link, valid for 30 days</p>'
+                f'<p>&#x1F3A5; <a href="{url}">{name}</a>'
+                f' &mdash; video, link valid for 30 days</p>'
             )
+
     parts.append("</div>")
     return "".join(parts) if len(parts) > 2 else ""

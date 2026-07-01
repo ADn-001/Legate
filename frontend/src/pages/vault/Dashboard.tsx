@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import { Lock, Users, Shield, Clock, Plus, Eye } from 'lucide-react'
+import { Lock, Users, Shield, Clock, Plus, Eye, AlertTriangle } from 'lucide-react'
 import { useAuthStore } from '../../store/auth'
 import { useCheckinSchedule } from '../../hooks/useCheckinSchedule'
 import { useCapsules } from '../../hooks/useCapsules'
@@ -28,10 +28,25 @@ export default function Dashboard() {
   const displayName = user?.full_name?.split(' ')[0] || user?.email?.split('@')[0] || 'there'
   const vaultStatus = deriveVaultStatus(schedule)
   const recentActivity: ActivityEntry[] = Array.isArray(activity) ? activity.slice(0, 3) : []
+  const isMemorialized = user?.status === 'memorialized'
 
   return (
     <div className="min-h-screen bg-[#F0F2F5] p-4">
       <div className="max-w-4xl mx-auto">
+        {/* T12: memorial banner */}
+        {isMemorialized && (
+          <div className="bg-slate-800 text-white rounded-2xl p-5 mb-6 flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="font-semibold mb-1">This account has been memorialized</p>
+              <p className="text-sm text-slate-300">
+                Your capsules have been delivered. The vault is now read-only — you cannot create or
+                edit capsules. If this was triggered by mistake, contact support.
+              </p>
+            </div>
+          </div>
+        )}
+
         <div className="mb-8">
           <h1 className="text-4xl font-bold text-[#0D1117] mb-2">Hello, {displayName}</h1>
           <p className="text-[#6B7280]">Your digital legacy is secured and up to date.</p>
@@ -74,10 +89,15 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Primary CTA */}
+        {/* Primary CTA — disabled for memorialized accounts */}
         <button
-          onClick={() => navigate('/vault/capsules/new')}
-          className="w-full py-4 bg-[#3D4F6B] text-white rounded-2xl font-semibold hover:bg-[#2a3851] transition-colors mb-8 flex items-center justify-center gap-2"
+          onClick={() => !isMemorialized && navigate('/vault/capsules/new')}
+          disabled={isMemorialized}
+          className={`w-full py-4 rounded-2xl font-semibold transition-colors mb-8 flex items-center justify-center gap-2 ${
+            isMemorialized
+              ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+              : 'bg-[#3D4F6B] text-white hover:bg-[#2a3851]'
+          }`}
         >
           <Plus className="w-5 h-5" />
           Create Capsule

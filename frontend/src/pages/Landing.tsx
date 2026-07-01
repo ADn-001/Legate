@@ -1,4 +1,4 @@
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import { Shield, Lock, CheckCircle } from 'lucide-react'
 
 export default function Landing() {
@@ -52,9 +52,9 @@ export default function Landing() {
               >
                 Get Started
               </button>
-              <button className="px-8 py-4 bg-gray-100 text-gray-800 rounded-2xl font-semibold hover:bg-gray-200 transition-colors text-center">
+              <Link to="/how-it-works" className="px-8 py-4 bg-gray-100 text-gray-800 rounded-2xl font-semibold hover:bg-gray-200 transition-colors text-center">
                 Learn More
-              </button>
+              </Link>
             </div>
           </div>
 
@@ -217,9 +217,9 @@ export default function Landing() {
             <div>
               <h4 className="font-bold text-[#0D1117] mb-4">Legal</h4>
               <ul className="space-y-2 text-[#6B7280] text-sm">
-                <li><a href="#" className="hover:text-[#3D4F6B]">Privacy</a></li>
-                <li><a href="#" className="hover:text-[#3D4F6B]">Terms</a></li>
-                <li><a href="#" className="hover:text-[#3D4F6B]">Security</a></li>
+                <li><Link to="/privacy" className="hover:text-[#3D4F6B]">Privacy</Link></li>
+                <li><Link to="/terms" className="hover:text-[#3D4F6B]">Terms</Link></li>
+                <li><Link to="/how-it-works" className="hover:text-[#3D4F6B]">How It Works</Link></li>
               </ul>
             </div>
           </div>

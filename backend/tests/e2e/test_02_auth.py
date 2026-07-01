@@ -26,8 +26,8 @@ BASE_SIGNUP = {
 @pytest.mark.asyncio
 async def test_signup_creates_user(http: AsyncClient):
     res = await http.post("/auth/signup", json={**BASE_SIGNUP, "email": fresh_email()})
-    if res.status_code == 429:
-        pytest.skip("Supabase email rate limit — re-run after cooldown")
+    if res.status_code in (429, 503):
+        pytest.skip("Supabase rate limit / unavailable — re-run after cooldown")
     assert res.status_code == 201
     body = res.json()
     assert "access_token" not in body
@@ -37,8 +37,8 @@ async def test_signup_creates_user(http: AsyncClient):
 async def test_signup_duplicate_email_returns_409(http: AsyncClient):
     email = fresh_email()
     first = await http.post("/auth/signup", json={**BASE_SIGNUP, "email": email})
-    if first.status_code == 429:
-        pytest.skip("Supabase email rate limit — re-run after cooldown")
+    if first.status_code in (429, 503):
+        pytest.skip("Supabase rate limit / unavailable — re-run after cooldown")
     assert first.status_code == 201
     res2 = await http.post("/auth/signup", json={**BASE_SIGNUP, "email": email})
     assert res2.status_code == 409
@@ -63,8 +63,8 @@ async def test_signup_creates_db_rows(http: AsyncClient):
     from sqlalchemy import select
     email = fresh_email()
     res = await http.post("/auth/signup", json={**BASE_SIGNUP, "email": email})
-    if res.status_code == 429:
-        pytest.skip("Supabase email rate limit — re-run after cooldown")
+    if res.status_code in (429, 503):
+        pytest.skip("Supabase rate limit / unavailable — re-run after cooldown")
     assert res.status_code == 201
     async with AsyncSessionLocal() as db:
         result = await db.execute(select(User).where(User.email == email))
@@ -83,11 +83,20 @@ async def test_signup_creates_db_rows(http: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_login_with_valid_credentials(registered_user, http: AsyncClient):
-    res = await http.post("/auth/login", json={
-        "email": registered_user["email"],
-        "password": registered_user["password"],
-    })
-    assert res.status_code == 200
+    import asyncio
+    res = None
+    for _attempt in range(4):
+        res = await http.post("/auth/login", json={
+            "email": registered_user["email"],
+            "password": registered_user["password"],
+        })
+        if res.status_code == 200:
+            break
+        if res.status_code in (429, 503):
+            pytest.skip("Supabase rate limit — re-run after cooldown")
+        if _attempt < 3:
+            await asyncio.sleep(5 * (_attempt + 1))
+    assert res is not None and res.status_code == 200, f"Login failed: {res.text}"
     body = res.json()
     assert "access_token" in body
     assert "refresh_token" in body
@@ -166,7 +175,14 @@ async def test_get_encryption_key(auth_client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_get_delivery_wrapping_key(auth_client: AsyncClient):
-    res = await auth_client.get("/auth/me/delivery-wrapping-key")
+    # S2 (Phase 5): endpoint changed from GET to POST to prevent caching and
+    # browser history exposure.  GET must now return 405 Method Not Allowed.
+    res_get = await auth_client.get("/auth/me/delivery-wrapping-key")
+    assert res_get.status_code == 405, (
+        f"S2: GET on delivery-wrapping-key should return 405, got {res_get.status_code}"
+    )
+
+    res = await auth_client.post("/auth/me/delivery-wrapping-key")
     assert res.status_code == 200
     body = res.json()
     assert "wrapping_key" in body
@@ -194,10 +210,20 @@ async def test_token_refresh_with_invalid_token_returns_401(http: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_logout_succeeds(registered_user, http: AsyncClient):
-    login = await http.post("/auth/login", json={
-        "email": registered_user["email"],
-        "password": registered_user["password"],
-    })
+    import asyncio
+    login = None
+    for _attempt in range(4):
+        login = await http.post("/auth/login", json={
+            "email": registered_user["email"],
+            "password": registered_user["password"],
+        })
+        if login.status_code == 200:
+            break
+        if login.status_code in (429, 503):
+            pytest.skip("Supabase rate limit / unavailable — re-run after cooldown")
+        if _attempt < 3:
+            await asyncio.sleep(5 * (_attempt + 1))
+    assert login is not None and login.status_code == 200, f"Login failed: {login.text}"
     tokens = login.json()
     res = await http.post(
         "/auth/logout",

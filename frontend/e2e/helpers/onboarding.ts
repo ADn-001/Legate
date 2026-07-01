@@ -46,9 +46,12 @@ export async function signupAndOnboard(
   // Capture the real /auth/signup response so a failure here reports the
   // actual backend status + body instead of just "didn't navigate" — the
   // generic toHaveURL timeout below gives zero diagnostic info on its own.
+  // 60 s timeout: the first Supabase GoTrue call from a cold/idle uvicorn
+  // worker triggers a TCP/TLS handshake that can take 20-30 s. The warmup
+  // fetch in global-setup should mitigate this, but 60 s is the safety net.
   const signupResponsePromise = page
     .waitForResponse((res) => res.url().includes('/auth/signup') && res.request().method() === 'POST', {
-      timeout: 20_000,
+      timeout: 60_000,
     })
     .catch(() => null)
 
@@ -66,7 +69,7 @@ export async function signupAndOnboard(
       .textContent()
       .catch(() => null)
     throw new Error(
-      `No /auth/signup response observed within 20s for ${email}. ` +
+      `No /auth/signup response observed within 60s for ${email}. ` +
         `On-page error banner: ${errorBanner ?? '<none visible>'}`
     )
   }
@@ -86,7 +89,7 @@ export async function signupAndOnboard(
   // need different fixes, so find out which actually happened.
   const verifyResponsePromise = page
     .waitForResponse((res) => res.url().includes('/auth/verify-email') && res.request().method() === 'POST', {
-      timeout: 20_000,
+      timeout: 60_000,
     })
     .catch(() => null)
 
@@ -113,7 +116,14 @@ export async function signupAndOnboard(
   }
 
   try {
-    await expect(page).toHaveURL(/\/setup\/checkin/, { timeout: 20_000 })
+    // 60 s, not 20 s: this waits on getMe() plus completeEncryptionSetup()'s
+    // four sequential API calls (getEncryptionKey, getDeliveryWrappingKey,
+    // updateDeliveryKey + local crypto), each of which can hit the same
+    // cold Supabase pooler TCP/TLS handshake documented above for
+    // /auth/signup. Confirmed via debug-failure.html dumps: the OTP submit
+    // button was still mid-request (disabled, spinner) well past 20 s on a
+    // real run, not stuck on an error — this was too tight, not a bug.
+    await expect(page).toHaveURL(/\/setup\/checkin/, { timeout: 60_000 })
   } catch (err) {
     // Verify itself returned 200 and we're not on the password-fallback
     // step either — something inside completeEncryptionSetup() (key
@@ -160,20 +170,27 @@ export async function signupAndOnboard(
     )
   }
 
-  await expect(page).toHaveURL(/\/setup\/beneficiary/, { timeout: 20_000 })
+  // 45 s (not 20 s) on the post-submit navigations below: each step's Save/
+  // Continue does a real backend round trip (beneficiary create + nomination
+  // email, settings PATCH, etc.), and this codebase's DB engine opens a new
+  // connection per request (NullPool — see backend/tests/e2e/conftest.py),
+  // which the project's own docs measure at ~10s overhead per request on
+  // the Supabase free-tier pooler. 20s was too tight; confirmed via
+  // debug-failure.html dumps showing in-flight requests, not stuck errors.
+  await expect(page).toHaveURL(/\/setup\/beneficiary/, { timeout: 45_000 })
   await page.getByLabel('Full Name').fill('E2E Test Beneficiary')
   await page.getByLabel('Email Address').fill(`beneficiary_${Date.now()}@example.com`)
   await page.getByRole('button', { name: 'Save' }).click()
 
-  await expect(page).toHaveURL(/\/setup\/capsule/, { timeout: 20_000 })
+  await expect(page).toHaveURL(/\/setup\/capsule/, { timeout: 45_000 })
   await page.getByRole('button', { name: 'Skip for now' }).click()
 
-  await expect(page).toHaveURL(/\/setup\/recovery/, { timeout: 20_000 })
+  await expect(page).toHaveURL(/\/setup\/recovery/, { timeout: 45_000 })
   const recoveryWords = await readRecoveryPhrase(page)
   await page.getByRole('checkbox').check()
   await page.getByRole('button', { name: "I'm Ready" }).click()
 
-  await expect(page).toHaveURL(/\/vault$/, { timeout: 20_000 })
+  await expect(page).toHaveURL(/\/vault$/, { timeout: 45_000 })
 
   return { email, password: TEST_PASSWORD, fullName, recoveryWords }
 }

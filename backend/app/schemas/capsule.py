@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 from pydantic import BaseModel, Field, field_validator
-from app.db.models.capsule import CapsuleStatus
+from app.db.models.capsule import CapsuleStatus, MediaType, MediaStatus
 
 
 class CapsuleCreate(BaseModel):
@@ -45,6 +45,7 @@ class CapsuleResponse(BaseModel):
     # decrypted.
     content_unrecoverable: bool = False
     content_size_bytes: int | None = None
+    media_attachments: list["MediaAttachmentResponse"] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 
@@ -56,6 +57,47 @@ class CapsuleResponse(BaseModel):
         if isinstance(v, bytes):
             return v.hex()
         return v
+
+
+class MediaAttachmentResponse(BaseModel):
+    id: uuid.UUID
+    kind: MediaType = Field(alias="type")
+    status: MediaStatus
+    original_name: str
+    mime_type: str
+    size_bytes: int
+    thumbnail_storage_path: str | None = None
+    cipher_iv: str  # hex or JSON metadata for chunked video
+    created_at: datetime
+
+    model_config = {"from_attributes": True, "populate_by_name": True}
+
+    @field_validator("cipher_iv", mode="before")
+    @classmethod
+    def _encode_cipher_iv(cls, v: object) -> object:
+        if isinstance(v, (bytes, bytearray)):
+            decoded = v.decode("utf-8", errors="replace")
+            # If it looks like JSON metadata (chunked video), return as-is string
+            if decoded.startswith("{"):
+                return decoded
+            # Otherwise hex-encode the raw IV bytes
+            return v.hex() if isinstance(v, bytes) else bytes(v).hex()
+        return v
+
+
+class MediaCreateRequest(BaseModel):
+    filename: str = Field(..., max_length=255)
+    content_type: str = Field(..., max_length=128)
+    size_bytes: int = Field(..., gt=0)
+    kind: MediaType
+    # hex-encoded AES-GCM IV (photos) or JSON metadata bytes (videos)
+    cipher_iv: str
+
+
+class MediaCreateResponse(BaseModel):
+    attachment_id: uuid.UUID
+    upload_url: str
+    storage_object_path: str
 
 
 class CapsuleContentResponse(BaseModel):
