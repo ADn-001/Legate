@@ -1,4 +1,10 @@
 node_modules
-dist
 .env
 *.local
+# Source — only dist/ is needed by the nginx image
+src
+public
+e2e
+# Playwright artifacts
+playwright-report
+test-results

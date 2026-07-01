@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { beneficiariesApi } from '../../api/beneficiaries'
+import { settingsApi } from '../../api/settings'
 import BeneficiaryForm from '../../components/beneficiary/BeneficiaryForm'
 import SecurityBanner from '../../components/ui/SecurityBanner'
 import { BeneficiaryCreatePayload } from '../../api/beneficiaries'
@@ -15,6 +16,7 @@ export default function StepBeneficiary() {
     setError(null)
     try {
       await beneficiariesApi.create(data)
+      await settingsApi.patchSettings({ setup_step: 3 }).catch(() => {})
       navigate('/setup/capsule')
     } catch {
       setError('Failed to add beneficiary. Please try again.')
@@ -22,6 +24,11 @@ export default function StepBeneficiary() {
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleSkip = async () => {
+    await settingsApi.patchSettings({ needs_onboarding: false }).catch(() => {})
+    navigate('/vault')
   }
 
   return (
@@ -45,6 +52,13 @@ export default function StepBeneficiary() {
           onCancel={() => navigate('/setup/checkin')}
           loading={loading}
         />
+
+        <button
+          onClick={handleSkip}
+          className="w-full mt-4 text-sm text-[#6B7280] hover:text-[#3D4F6B] transition-colors py-2"
+        >
+          Skip setup
+        </button>
       </div>
     </div>
   )

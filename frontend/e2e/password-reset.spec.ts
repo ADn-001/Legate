@@ -18,9 +18,10 @@ test('password reset via recovery phrase preserves existing capsule content (R-0
   // Wait for the beneficiary auto-select before saving (see capsule-edit.spec.ts).
   await expect(page.locator('select')).not.toHaveValue('', { timeout: 10_000 })
   await page.locator('input[placeholder="e.g. Instructions for Sarah"]').fill('Pre-Reset Capsule')
-  await page
-    .locator('textarea[placeholder="Write your message here..."]')
-    .fill('Content written before the password reset.')
+  // T9/Phase 4: tiptap contenteditable replaces textarea
+  const editor = page.locator('[contenteditable="true"]')
+  await editor.click()
+  await editor.pressSequentially('Content written before the password reset.')
   await page.getByRole('button', { name: 'Save Capsule' }).click()
   await expect(page).toHaveURL(/\/vault\/capsules$/, { timeout: 20_000 })
 

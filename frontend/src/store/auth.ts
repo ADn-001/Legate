@@ -5,6 +5,7 @@ export interface User {
   email: string
   full_name?: string
   email_verified: boolean
+  status?: 'active' | 'suspended' | 'memorialized' | 'pending_deletion' | 'deleted'
   needs_onboarding?: boolean
 }
 
@@ -36,6 +37,6 @@ export const useAuthStore = create<AuthState>((set) => ({
   setBootstrapped: (val) => set({ bootstrapped: val }),
   clear: () => {
     localStorage.removeItem('refresh_token')
-    set({ user: null, accessToken: null, isAuthenticated: false, needsOnboarding: false })
+    set({ user: null, accessToken: null, isAuthenticated: false, needsOnboarding: false, bootstrapped: false })
   },
 }))

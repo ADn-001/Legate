@@ -16,7 +16,10 @@ test('draft autosave is encrypted at rest and restores after unlock', async ({ p
   const secretSentence = 'This sentence must never appear in plaintext in localStorage.'
   const secretTitle = 'Draft Test Capsule'
   await page.locator('input[placeholder="e.g. Instructions for Sarah"]').fill(secretTitle)
-  await page.locator('textarea[placeholder="Write your message here..."]').fill(secretSentence)
+  // T9/Phase 4: tiptap contenteditable replaces textarea
+  const editor = page.locator('[contenteditable="true"]')
+  await editor.click()
+  await editor.pressSequentially(secretSentence)
 
   // Autosave runs on a 30s interval (CapsuleEditor.tsx) — poll rather than
   // sleep blindly, but it genuinely takes about that long.
@@ -42,5 +45,5 @@ test('draft autosave is encrypted at rest and restores after unlock', async ({ p
   await expect(page.locator('input[placeholder="e.g. Instructions for Sarah"]')).toHaveValue(secretTitle, {
     timeout: 10_000,
   })
-  await expect(page.locator('textarea[placeholder="Write your message here..."]')).toHaveValue(secretSentence)
+  await expect(page.locator('[contenteditable="true"]')).toContainText(secretSentence)
 })

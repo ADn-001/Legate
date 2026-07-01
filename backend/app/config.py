@@ -3,8 +3,41 @@ Application configuration loaded from environment variables.
 Uses pydantic-settings for typed, validated config.
 """
 
-from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
+
+from pydantic import model_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Substrings that indicate a placeholder / known-weak secret.
+_WEAK_FRAGMENTS = ("fake", "changeme", "secret", "example", "replace", "placeholder")
+
+# Minimum length for secret values.
+_SECRET_MIN_LEN = 32
+
+
+def _validate_secret(field_name: str, value: str) -> str:
+    """Raise ValueError if *value* is obviously weak (too short or contains a
+    known placeholder fragment).  Callers embed this in model_validator so that
+    pydantic raises a clear startup error rather than silently running with a
+    derivable key.
+
+    Generate compliant values with::
+
+        openssl rand -base64 48
+    """
+    if len(value) < _SECRET_MIN_LEN:
+        raise ValueError(
+            f"{field_name} is too short ({len(value)} chars, minimum {_SECRET_MIN_LEN}). "
+            "Generate with: openssl rand -base64 48"
+        )
+    lower = value.lower()
+    for frag in _WEAK_FRAGMENTS:
+        if frag in lower:
+            raise ValueError(
+                f"{field_name} contains a known-weak placeholder fragment ({frag!r}). "
+                "Generate with: openssl rand -base64 48"
+            )
+    return value
 
 
 class Settings(BaseSettings):
@@ -42,8 +75,10 @@ class Settings(BaseSettings):
     pbkdf2_iterations: int = 100000
 
     # Supabase JWT + delivery
-    supabase_jwt_secret: str = "fake-jwt-secret"
-    delivery_secret: str = "fake-delivery-secret"
+    # These fields have NO default — startup fails loudly if they are unset or weak.
+    # Generate compliant values with: openssl rand -base64 48
+    supabase_jwt_secret: str
+    delivery_secret: str
     base_url: str = "http://localhost:8000"
     # T6: base URL of the frontend SPA, used as the Supabase password-reset
     # magic-link redirect target (-> {frontend_url}/auth/reset-password).
@@ -60,6 +95,14 @@ class Settings(BaseSettings):
     # Empty string disables alert emails (audit log row is always written).
     alert_email: str = ""
 
+
+    @model_validator(mode="after")
+    def _validate_secrets(self) -> "Settings":
+        """Reject obviously-weak values for all secret fields at startup."""
+        _validate_secret("SUPABASE_JWT_SECRET", self.supabase_jwt_secret)
+        _validate_secret("DELIVERY_SECRET", self.delivery_secret)
+        _validate_secret("SECRET_KEY", self.secret_key)
+        return self
 
     @property
     def cors_origins_list(self) -> list[str]:

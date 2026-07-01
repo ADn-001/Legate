@@ -154,14 +154,14 @@ async def _purge_capsule_storage(capsule_id: str):
     name="app.worker.tasks.cleanup_tasks.purge_user_storage",
     bind=True, max_retries=5, default_retry_delay=600,
 )
-def purge_user_storage(self, user_id: str):
+def purge_user_storage(self, user_id: str, trigger_id: str | None = None):
     try:
-        asyncio.run(_purge_user_storage(user_id))
+        asyncio.run(_purge_user_storage(user_id, trigger_id=trigger_id))
     except Exception as exc:
         raise self.retry(exc=exc)
 
 
-async def _purge_user_storage(user_id: str):
+async def _purge_user_storage(user_id: str, trigger_id: str | None = None):
     from sqlalchemy import select
     from app.db.session import AsyncSessionLocal
     from app.db.models.capsule import Capsule, CapsuleStatus
@@ -177,6 +177,16 @@ async def _purge_user_storage(user_id: str):
 
         # Raises (→ Celery retry) if any object survives removal (B9).
         _purge_storage_for_user(user_id, capsule_ids, cfg, storage)
+
+        # Purge delivery copies (plaintext decrypted for delivery email) placed
+        # under deliveries/{trigger_id}/ in the media bucket (T1/Phase 4).
+        if trigger_id:
+            delivery_prefix = f"deliveries/{trigger_id}"
+            delivery_paths = _collect_object_paths(
+                storage, cfg.supabase_storage_bucket_media, delivery_prefix
+            )
+            if delivery_paths:
+                _remove_paths(storage, cfg.supabase_storage_bucket_media, delivery_paths)
 
         result = await db.execute(select(Capsule).where(Capsule.user_id == user_id))
         for capsule in result.scalars().all():

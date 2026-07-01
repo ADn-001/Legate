@@ -2,16 +2,21 @@
 
 import uuid
 import secrets
+from datetime import datetime, timezone
 
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_
+from sqlalchemy.orm.attributes import set_committed_value
 
 from app.config import get_settings
 from app.core.audit import write_audit
 from app.core.supabase import get_storage
 from app.db.models.beneficiary import Beneficiary
-from app.db.models.capsule import Capsule, CapsuleStatus, CapsuleRecipient, RecipientStatus
+from app.db.models.capsule import (
+    Capsule, CapsuleStatus, CapsuleRecipient, RecipientStatus,
+    MediaAttachment, MediaType, MediaStatus,
+)
 
 # Short-lived: these signed URLs are used immediately by the owner's browser
 # for in-app edit/view, unlike the 30-day delivery links sent to beneficiaries.
@@ -23,13 +28,15 @@ class CapsuleService:
         self.db = db
 
     async def _annotate_recipients(self, capsules: list[Capsule]) -> None:
-        """Attach has_recipients (FR-22) and the primary beneficiary_id (T5/F6)
-        to each capsule."""
+        """Attach has_recipients (FR-22), primary beneficiary_id (T5/F6),
+        and media_attachments list (T1/Phase 4) to each capsule."""
         if not capsules:
             return
+        caps_ids = [c.id for c in capsules]
+
         result = await self.db.execute(
             select(CapsuleRecipient.capsule_id, CapsuleRecipient.beneficiary_id, CapsuleRecipient.is_primary)
-            .where(CapsuleRecipient.capsule_id.in_([c.id for c in capsules]))
+            .where(CapsuleRecipient.capsule_id.in_(caps_ids))
         )
         counts: dict[uuid.UUID, int] = {}
         primary: dict[uuid.UUID, uuid.UUID] = {}
@@ -40,6 +47,25 @@ class CapsuleService:
         for capsule in capsules:
             capsule.has_recipients = counts.get(capsule.id, 0) > 0
             capsule.beneficiary_id = primary.get(capsule.id)
+
+        # Load ready media attachments for each capsule (T1, Phase 4).
+        media_result = await self.db.execute(
+            select(MediaAttachment)
+            .where(
+                and_(
+                    MediaAttachment.capsule_id.in_(caps_ids),
+                    MediaAttachment.status != MediaStatus.deleted,
+                )
+            )
+            .order_by(MediaAttachment.created_at)
+        )
+        media_by_capsule: dict[uuid.UUID, list[MediaAttachment]] = {}
+        for att in media_result.scalars().all():
+            media_by_capsule.setdefault(att.capsule_id, []).append(att)
+        for capsule in capsules:
+            # set_committed_value writes directly into instance state, bypassing
+            # SQLAlchemy's lazy-load-before-replace in async context (MissingGreenlet).
+            set_committed_value(capsule, 'media_attachments', media_by_capsule.get(capsule.id, []))
 
     async def list_for_user(self, user_id: uuid.UUID) -> list[Capsule]:
         # B17: pending_deletion capsules stay visible (FR-31 badge);
@@ -104,17 +130,27 @@ class CapsuleService:
         self.db.add(recipient)
 
         # Generate signed upload URL using isolated storage client (service role key,
-        # not contaminated by user SIGNED_IN events from auth operations)
+        # not contaminated by user SIGNED_IN events from auth operations).
+        # Retry up to 3 times — storage3 raises UnboundLocalError when the
+        # Storage API returns an unexpected response (transient Supabase hiccup).
+        import asyncio
+        import logging as _logging
         cfg = get_settings()
         storage_path = f"{user_id}/{capsule.id}/content.enc"
-        try:
-            storage = get_storage()
-            upload_response = storage.from_(cfg.supabase_storage_bucket_content).create_signed_upload_url(storage_path)
-            upload_url = upload_response.get("signedURL") or upload_response.get("signed_url", "")
-        except Exception as _e:
-            import logging
-            logging.getLogger(__name__).error("upload_url generation failed: %s", _e)
-            upload_url = ""
+        upload_url = ""
+        for _attempt in range(3):
+            try:
+                storage = get_storage()
+                upload_response = storage.from_(cfg.supabase_storage_bucket_content).create_signed_upload_url(storage_path)
+                upload_url = upload_response.get("signedURL") or upload_response.get("signed_url", "")
+                if upload_url:
+                    break
+            except Exception as _e:
+                _logging.getLogger(__name__).error(
+                    "upload_url generation failed (attempt %d/3): %s", _attempt + 1, _e
+                )
+                if _attempt < 2:
+                    await asyncio.sleep(3 * (_attempt + 1))  # 3 s, 6 s
 
         await write_audit(self.db, "capsule_created", user_id=user_id, resource_id=capsule.id)
         await self.db.commit()
@@ -256,3 +292,324 @@ class CapsuleService:
 
         from app.worker.tasks.cleanup_tasks import purge_capsule_storage
         purge_capsule_storage.apply_async(args=[str(capsule_id)], countdown=86400)
+
+    # ── Media attachment methods (T1/T2, Phase 4) ───────────────────────────
+
+    async def create_media(
+        self,
+        capsule_id: uuid.UUID,
+        user_id: uuid.UUID,
+        filename: str,
+        content_type: str,
+        size_bytes: int,
+        kind: MediaType,
+        cipher_iv: str,
+    ) -> dict:
+        """Create a MediaAttachment row (status=uploading) and return a signed upload URL."""
+        await self.get_by_id(capsule_id, user_id)  # ownership check
+
+        cfg = get_settings()
+
+        # Validate per-kind constraints
+        if kind == MediaType.photo:
+            allowed_types = {"image/jpeg", "image/png", "image/heic", "image/heif"}
+            if content_type.lower() not in allowed_types:
+                from fastapi import HTTPException, status as http_status
+                raise HTTPException(
+                    status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="Photos must be JPEG, PNG, or HEIC",
+                )
+            max_bytes = 10 * 1024 * 1024  # 10 MB
+            if size_bytes > max_bytes:
+                from fastapi import HTTPException, status as http_status
+                raise HTTPException(
+                    status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="Photos must be ≤ 10 MB",
+                )
+            # Count existing photos
+            count_result = await self.db.execute(
+                select(func.count()).select_from(MediaAttachment).where(
+                    and_(
+                        MediaAttachment.capsule_id == capsule_id,
+                        MediaAttachment.type == MediaType.photo,
+                        MediaAttachment.status != MediaStatus.deleted,
+                    )
+                )
+            )
+            count = count_result.scalar() or 0
+            if count >= 20:
+                from fastapi import HTTPException, status as http_status
+                raise HTTPException(
+                    status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="Maximum 20 photos per capsule",
+                )
+        elif kind == MediaType.video:
+            allowed_types = {"video/mp4", "video/quicktime", "video/x-msvideo", "video/x-m4v"}
+            if content_type.lower() not in allowed_types:
+                from fastapi import HTTPException, status as http_status
+                raise HTTPException(
+                    status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="Videos must be MP4 or MOV",
+                )
+            max_bytes = 500 * 1024 * 1024  # 500 MB
+            if size_bytes > max_bytes:
+                from fastapi import HTTPException, status as http_status
+                raise HTTPException(
+                    status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="Videos must be ≤ 500 MB",
+                )
+            # Max one video per capsule
+            video_count_result = await self.db.execute(
+                select(func.count()).select_from(MediaAttachment).where(
+                    and_(
+                        MediaAttachment.capsule_id == capsule_id,
+                        MediaAttachment.type == MediaType.video,
+                        MediaAttachment.status != MediaStatus.deleted,
+                    )
+                )
+            )
+            if (video_count_result.scalar() or 0) >= 1:
+                from fastapi import HTTPException, status as http_status
+                raise HTTPException(
+                    status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="Maximum one video per capsule",
+                )
+
+        attachment_id = uuid.uuid4()
+        storage_path = f"{user_id}/{capsule_id}/{attachment_id}/media.enc"
+
+        # Encode cipher_iv: hex string for single-IV (photo); JSON metadata for chunked video
+        cipher_iv_bytes: bytes
+        if cipher_iv.startswith("{"):
+            cipher_iv_bytes = cipher_iv.encode("utf-8")
+        else:
+            try:
+                cipher_iv_bytes = bytes.fromhex(cipher_iv)
+            except ValueError:
+                cipher_iv_bytes = cipher_iv.encode("utf-8")
+
+        attachment = MediaAttachment(
+            id=attachment_id,
+            capsule_id=capsule_id,
+            type=kind,
+            original_name=filename,
+            mime_type=content_type,
+            size_bytes=size_bytes,
+            storage_object_path=storage_path,
+            cipher_iv=cipher_iv_bytes,
+            status=MediaStatus.uploading,
+            created_at=datetime.now(timezone.utc),
+        )
+        self.db.add(attachment)
+        await self.db.commit()
+
+        # Generate signed upload URL for media bucket
+        try:
+            storage = get_storage()
+            upload_response = storage.from_(cfg.supabase_storage_bucket_media).create_signed_upload_url(storage_path)
+            upload_url = upload_response.get("signedURL") or upload_response.get("signed_url", "")
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).error("media signed URL generation failed: %s", exc)
+            upload_url = ""
+
+        return {
+            "attachment_id": attachment_id,
+            "upload_url": upload_url,
+            "storage_object_path": storage_path,
+        }
+
+    async def upload_media_content(
+        self,
+        capsule_id: uuid.UUID,
+        attachment_id: uuid.UUID,
+        user_id: uuid.UUID,
+        data: bytes,
+    ) -> dict:
+        """Server-side media upload (mirrors upload_content pattern from Phase 3).
+        Used when signed-URL PUT is unavailable or for large files.
+        """
+        await self.get_by_id(capsule_id, user_id)  # ownership check
+
+        result = await self.db.execute(
+            select(MediaAttachment).where(
+                and_(MediaAttachment.id == attachment_id, MediaAttachment.capsule_id == capsule_id)
+            )
+        )
+        attachment = result.scalar_one_or_none()
+        if not attachment:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Media attachment not found")
+
+        cfg = get_settings()
+        try:
+            storage = get_storage()
+            storage.from_(cfg.supabase_storage_bucket_media).upload(
+                path=attachment.storage_object_path,
+                file=data,
+                file_options={"contentType": "application/octet-stream"},
+            )
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).error("media upload failed: %s", exc)
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Media upload failed")
+
+        attachment.status = MediaStatus.ready
+        await self.db.commit()
+        return {"storage_object_path": attachment.storage_object_path}
+
+    async def confirm_media(
+        self,
+        capsule_id: uuid.UUID,
+        attachment_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> MediaAttachment:
+        """Mark media as ready after client confirms upload completed."""
+        await self.get_by_id(capsule_id, user_id)  # ownership check
+
+        result = await self.db.execute(
+            select(MediaAttachment).where(
+                and_(MediaAttachment.id == attachment_id, MediaAttachment.capsule_id == capsule_id)
+            )
+        )
+        attachment = result.scalar_one_or_none()
+        if not attachment:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Media attachment not found")
+
+        cfg = get_settings()
+        # Verify object exists in storage
+        try:
+            storage = get_storage()
+            objects = storage.from_(cfg.supabase_storage_bucket_media).list(
+                f"{user_id}/{capsule_id}/{attachment_id}"
+            )
+            exists = any(obj.get("name") for obj in (objects or []))
+        except Exception:
+            exists = False
+
+        if not exists:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Upload not confirmed: object not found in storage",
+            )
+
+        attachment.status = MediaStatus.ready
+        await self.db.commit()
+        return attachment
+
+    async def update_media_thumbnail(
+        self,
+        capsule_id: uuid.UUID,
+        attachment_id: uuid.UUID,
+        user_id: uuid.UUID,
+        data: bytes,
+    ) -> dict:
+        """Server-side upload of an encrypted thumbnail blob."""
+        await self.get_by_id(capsule_id, user_id)  # ownership check
+
+        result = await self.db.execute(
+            select(MediaAttachment).where(
+                and_(MediaAttachment.id == attachment_id, MediaAttachment.capsule_id == capsule_id)
+            )
+        )
+        attachment = result.scalar_one_or_none()
+        if not attachment:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Media attachment not found")
+
+        cfg = get_settings()
+        thumb_path = f"{user_id}/{capsule_id}/{attachment_id}/thumb.enc"
+        try:
+            storage = get_storage()
+            storage.from_(cfg.supabase_storage_bucket_thumbnails).upload(
+                path=thumb_path,
+                file=data,
+                file_options={"contentType": "application/octet-stream"},
+            )
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).error("thumbnail upload failed: %s", exc)
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Thumbnail upload failed")
+
+        attachment.thumbnail_storage_path = thumb_path
+        await self.db.commit()
+        return {"thumbnail_storage_path": thumb_path}
+
+    async def get_media_download_url(
+        self,
+        capsule_id: uuid.UUID,
+        attachment_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> dict:
+        """Return a short-lived signed URL to download (and decrypt) a media blob."""
+        await self.get_by_id(capsule_id, user_id)
+
+        result = await self.db.execute(
+            select(MediaAttachment).where(
+                and_(MediaAttachment.id == attachment_id, MediaAttachment.capsule_id == capsule_id)
+            )
+        )
+        attachment = result.scalar_one_or_none()
+        if not attachment:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Media attachment not found")
+
+        cfg = get_settings()
+        try:
+            storage = get_storage()
+            signed = storage.from_(cfg.supabase_storage_bucket_media).create_signed_url(
+                attachment.storage_object_path, 3600
+            )
+            url = signed.get("signedURL") or signed.get("signed_url", "")
+            thumb_url = None
+            if attachment.thumbnail_storage_path:
+                thumb_signed = storage.from_(cfg.supabase_storage_bucket_thumbnails).create_signed_url(
+                    attachment.thumbnail_storage_path, 3600
+                )
+                thumb_url = thumb_signed.get("signedURL") or thumb_signed.get("signed_url")
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).error("media signed URL failed: %s", exc)
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Could not generate download URL")
+
+        return {
+            "url": url,
+            "thumb_url": thumb_url,
+            "cipher_iv": (
+                attachment.cipher_iv.decode("utf-8", errors="replace")
+                if attachment.cipher_iv.decode("utf-8", errors="replace").startswith("{")
+                else attachment.cipher_iv.hex()
+            ),
+        }
+
+    async def delete_media(
+        self,
+        capsule_id: uuid.UUID,
+        attachment_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> None:
+        """Delete a media attachment row and its storage objects."""
+        await self.get_by_id(capsule_id, user_id)  # ownership check
+
+        result = await self.db.execute(
+            select(MediaAttachment).where(
+                and_(MediaAttachment.id == attachment_id, MediaAttachment.capsule_id == capsule_id)
+            )
+        )
+        attachment = result.scalar_one_or_none()
+        if not attachment:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Media attachment not found")
+
+        cfg = get_settings()
+        try:
+            storage = get_storage()
+            # Remove main blob
+            storage.from_(cfg.supabase_storage_bucket_media).remove([attachment.storage_object_path])
+            # Remove thumbnail if present
+            if attachment.thumbnail_storage_path:
+                storage.from_(cfg.supabase_storage_bucket_thumbnails).remove(
+                    [attachment.thumbnail_storage_path]
+                )
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning("media storage delete failed (ignored): %s", exc)
+
+        attachment.status = MediaStatus.deleted
+        await self.db.commit()

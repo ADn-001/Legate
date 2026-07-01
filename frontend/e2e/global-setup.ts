@@ -98,11 +98,46 @@ export default async function globalSetup(): Promise<void> {
     return
   }
 
+  // Warm up the Supabase GoTrue HTTP connection before the browser signup.
+  // The first GoTrue call from uvicorn after a long idle period triggers a
+  // cold TCP/TLS handshake that can take 20-30 s.
+  //
+  // uvicorn runs --workers 2 (see backend/entrypoint.sh). A single warmup
+  // request may land on only one worker, leaving the other cold when the
+  // actual signup arrives. Sending 4 parallel requests ensures high
+  // probability that BOTH workers receive at least one warmup hit.
+  const apiBase = `${baseURL.replace(/\/$/, '')}/api`
+  console.log('[global-setup] Warming up Supabase auth connection (both workers)…')
+  const warmupBody = JSON.stringify({ email: 'warmup@nonexistent.dev', password: 'WarmupOnly' })
+  await Promise.all(
+    Array.from({ length: 4 }, () =>
+      fetch(`${apiBase}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: warmupBody,
+      }).catch(() => null)
+    )
+  )
+  console.log('[global-setup] Warmup done.')
+
   // baseURL already set above
-  const browser = await chromium.launch()
+  // Playwright 1.46+ defaults to chrome-headless-shell for headless mode.
+  // On machines where only the full Chromium is installed (e.g. npx playwright
+  // install only downloaded chrome-win64), pass its path explicitly via
+  // PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH. Falls back to Playwright's default
+  // resolution when the env var is unset (CI, fresh installs, etc.).
+  const browser = await chromium.launch(
+    process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
+      ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH }
+      : undefined,
+  )
   try {
+    // The SW POST→GET issue is fixed at the source (vite.config.ts
+    // runtimeCaching method: 'GET'), so no serviceWorkers: 'block' needed.
     const context = await browser.newContext({ baseURL })
     const page = await context.newPage()
+    page.on('console', (msg) => console.log(`[browser:${msg.type()}]`, msg.text()))
+    page.on('pageerror', (err) => console.error('[browser:pageerror]', err))
     const email = freshEmail('shared')
     try {
       const result = await signupAndOnboard(page, email, 'Shared E2E User')

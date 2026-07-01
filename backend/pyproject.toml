@@ -6,8 +6,18 @@ requires-python = ">=3.11"
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-select = ["E", "F", "I", "N", "W", "UP"]
+select = ["E", "F", "I", "N", "W", "UP", "T20"]
+# T20: flake8-print — flags print() calls anywhere in the codebase so accidental
+# print(cek) / print(plaintext) regressions fail lint (NFR-09, Phase 5 T6).
+# E501 ignored: line-length checked by the formatter, not the linter.
 ignore = ["E501"]
+
+# Phase 5 T6: NFR-09 plaintext-logging guard.
+# Run: bash scripts/check_no_plaintext_log.sh
+# This grep-based check catches logger.*cek / logger.*plaintext / logger.*wrapping_key
+# patterns that ruff's T20 does not cover (logger calls, not print calls).
+# Add this to CI after `ruff check .`:
+#   bash scripts/check_no_plaintext_log.sh
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

@@ -13,6 +13,8 @@ services:
 
   api:
     build: ./backend
+    image: legate-backend:latest   # named so worker/beat can reuse it without a second build
+    init: true   # tini as PID 1 — required so uvicorn's spawn-based multiprocess workers don't deadlock
     env_file: .env
     ports:
       - "8000:8000"
@@ -37,19 +39,23 @@ services:
       - SUPABASE_STORAGE_BUCKET_THUMBNAILS=${SUPABASE_STORAGE_BUCKET_THUMBNAILS:-thumbnails}
       - STORAGE_QUOTA_BYTES=${STORAGE_QUOTA_BYTES:-1073741824}
       - ALERT_EMAIL=${ALERT_EMAIL:-}
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost}
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 15s
       timeout: 5s
-      retries: 5
-      start_period: 20s
+      retries: 10
+      start_period: 60s
     depends_on:
       redis:
         condition: service_healthy
     restart: unless-stopped
 
   worker:
-    build: ./backend
+    image: legate-backend:latest   # reuse api build — no separate pip install
     command: celery -A app.worker.celery_app worker --loglevel=info
     env_file: .env
     environment:
@@ -79,7 +85,7 @@ services:
     restart: unless-stopped
 
   beat:
-    build: ./backend
+    image: legate-backend:latest   # reuse api build — no separate pip install
     command: celery -A app.worker.celery_app beat --loglevel=info
     env_file: .env
     environment:

@@ -3,9 +3,24 @@ export interface User {
   email: string
   full_name?: string
   email_verified: boolean
-  status: string
+  status: 'active' | 'suspended' | 'memorialized' | 'pending_deletion' | 'deleted'
   created_at: string
   needs_onboarding: boolean
+}
+
+export type MediaKind = 'photo' | 'video'
+export type MediaStatus = 'uploading' | 'ready' | 'failed' | 'deleted'
+
+export interface MediaAttachment {
+  id: string
+  kind: MediaKind
+  status: MediaStatus
+  original_name: string
+  mime_type: string
+  size_bytes: number
+  thumbnail_storage_path: string | null
+  cipher_iv: string  // hex for photos; JSON string for chunked video
+  created_at: string
 }
 
 export interface Capsule {
@@ -20,6 +35,7 @@ export interface Capsule {
   has_recipients: boolean
   content_unrecoverable: boolean
   content_size_bytes: number | null
+  media_attachments: MediaAttachment[]
   created_at: string
   updated_at: string
 }

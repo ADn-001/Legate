@@ -14,7 +14,16 @@ from app.config import get_settings
 
 
 def _esc(value: str | None) -> str:
+    """HTML-escape a value for safe interpolation into HTML templates."""
     return html_mod.escape(value or "", quote=True)
+
+
+def _strip_header(value: str | None) -> str:
+    """Strip CR and LF from a string to prevent email header injection.
+    Use this for any user-supplied fragment that appears in a Subject or other
+    header (not the HTML body — use _esc for body content).
+    """
+    return (value or "").replace("\r", "").replace("\n", "").replace("\x00", "")
 
 
 def _get_resend():
@@ -110,11 +119,19 @@ def send_delivery_email(
     nominator_name: str = "someone",
 ) -> str:
     """One email per beneficiary (FR-39). capsules_html is pre-rendered and
-    pre-escaped by the delivery task; names are escaped here."""
+    pre-sanitized by the delivery task; names are escaped here.
+
+    S3: beneficiary_name and nominator_name are HTML-escaped for the body.
+    The subject uses _strip_header (plain text, no HTML entities) to prevent
+    header injection.
+    """
     r = _get_resend()
     cfg = get_settings()
-    beneficiary_name = _esc(beneficiary_name)
-    nominator_name = _esc(nominator_name)
+    # Subject: strip CR/LF only — subjects must not contain HTML entities.
+    subject_nominator = _strip_header(nominator_name)
+    # Body: full HTML-escaping for safe interpolation into HTML templates.
+    beneficiary_name_html = _esc(beneficiary_name)
+    nominator_name_html = _esc(nominator_name)
     html = f"""<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="UTF-8"><title>A message for you</title>
@@ -125,10 +142,10 @@ def send_delivery_email(
 </style>
 </head>
 <body>
-  <h2>A message for you from {nominator_name}</h2>
+  <h2>A message for you from {nominator_name_html}</h2>
   <div class="intro">
-    <p>Dear {beneficiary_name},</p>
-    <p>{nominator_name} prepared the following message(s) for you through Legate, a secure digital estate service. These messages were meant to reach you only at this moment.</p>
+    <p>Dear {beneficiary_name_html},</p>
+    <p>{nominator_name_html} prepared the following message(s) for you through Legate, a secure digital estate service. These messages were meant to reach you only at this moment.</p>
   </div>
   {capsules_html}
   <div class="footer">
@@ -141,7 +158,7 @@ def send_delivery_email(
     data = r.Emails.send({
         "from": cfg.email_from,
         "to": [to],
-        "subject": f"A message for you from {nominator_name}",
+        "subject": f"A message for you from {subject_nominator}",
         "html": html,
     })
     return data.get("id", "")
@@ -195,9 +212,13 @@ def send_emergency_pause_email(
     FR-23/24: notify the emergency contact that delivery is about to proceed,
     with a single-click pause link valid until the 48h deadline.
     Plain-language, non-alarming tone per FR-40.
+
+    S3: user_name and contact_name are HTML-escaped for the body.
+    The subject uses _strip_header (no HTML entities) to prevent header injection.
     """
     r = _get_resend()
     cfg = get_settings()
+    subject_user = _strip_header(user_name)
     contact_name = _esc(contact_name)
     user_name = _esc(user_name)
     deadline_str = deadline.strftime("%A, %B %d, %Y at %H:%M UTC")
@@ -230,7 +251,7 @@ def send_emergency_pause_email(
     data = r.Emails.send({
         "from": cfg.email_from,
         "to": [to],
-        "subject": f"Legate: {user_name} hasn't checked in — you can pause delivery",
+        "subject": f"Legate: {subject_user} hasn't checked in — you can pause delivery",
         "html": html,
     })
     return data.get("id", "")
@@ -276,6 +297,7 @@ def send_alert_email(to: str, subject: str, body_text: str) -> str:
     """Internal operational alert (B6: permanent delivery failure)."""
     r = _get_resend()
     cfg = get_settings()
+    subject_safe = _strip_header(subject)
     body_html = _esc(body_text).replace("\n", "<br>")
     html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -289,7 +311,7 @@ def send_alert_email(to: str, subject: str, body_text: str) -> str:
     data = r.Emails.send({
         "from": cfg.email_from,
         "to": [to],
-        "subject": f"[LEGATE ALERT] {subject}",
+        "subject": f"[LEGATE ALERT] {subject_safe}",
         "html": html,
     })
     return data.get("id", "")

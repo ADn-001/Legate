@@ -20,7 +20,7 @@ export const authApi = {
   logout: (data: { refresh_token: string }) => client.post('/auth/logout', data),
   getMe: () => client.get('/auth/me'),
   getEncryptionKey: () => client.get('/auth/me/encryption-key'),
-  getDeliveryWrappingKey: () => client.get('/auth/me/delivery-wrapping-key'),
+  getDeliveryWrappingKey: () => client.post('/auth/me/delivery-wrapping-key', {}),
   updateDeliveryKey: (data: { delivery_encrypted_cek: string; delivery_cek_iv: string }) =>
     client.patch('/auth/me/encryption-key', data),
   updatePrimaryKey: (data: { encrypted_cek: string; cek_iv: string; pbkdf2_salt: string }) =>

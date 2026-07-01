@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db_session
-from app.dependencies import get_current_verified_user
+from app.dependencies import get_current_verified_user, require_active_user
 from app.schemas.beneficiary import BeneficiaryCreate, BeneficiaryUpdate, BeneficiaryResponse
 from app.services.beneficiary_service import BeneficiaryService
 
@@ -28,7 +28,7 @@ async def list_beneficiaries(
 async def add_beneficiary(
     body: BeneficiaryCreate,
     db: AsyncSession = Depends(get_db_session),
-    current_user=Depends(get_current_verified_user),
+    current_user=Depends(require_active_user),
 ):
     svc = BeneficiaryService(db)
     return await svc.create(
@@ -46,7 +46,7 @@ async def update_beneficiary(
     beneficiary_id: uuid.UUID,
     body: BeneficiaryUpdate,
     db: AsyncSession = Depends(get_db_session),
-    current_user=Depends(get_current_verified_user),
+    current_user=Depends(require_active_user),
 ):
     svc = BeneficiaryService(db)
     return await svc.update(
@@ -61,7 +61,7 @@ async def update_beneficiary(
 async def remove_beneficiary(
     beneficiary_id: uuid.UUID,
     db: AsyncSession = Depends(get_db_session),
-    current_user=Depends(get_current_verified_user),
+    current_user=Depends(require_active_user),
 ):
     svc = BeneficiaryService(db)
     await svc.remove(beneficiary_id=beneficiary_id, user_id=current_user.id)

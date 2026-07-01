@@ -16,7 +16,10 @@ export const TEST_PASSWORD = 'TestPassword123!'
 // :80/http://localhost (which silently hits that other process and 404s).
 // `$env:E2E_BASE_URL` doesn't persist across new shell sessions, so this
 // must be the single source of truth rather than relying on it being set.
-export const DEFAULT_BASE_URL = 'http://localhost:8080'
+// NOTE: use 127.0.0.1 not localhost — on Windows+WSL2, `localhost` is
+// intercepted by the WSL loopback proxy which resets the connection.
+// 127.0.0.1 routes directly to Docker's port forwarder and works correctly.
+export const DEFAULT_BASE_URL = 'http://127.0.0.1:8080'
 
 export function freshEmail(tag: string): string {
   const [local, domain] = MAILBOX.split('@')
