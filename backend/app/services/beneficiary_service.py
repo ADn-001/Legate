@@ -26,10 +26,16 @@ class BeneficiaryService:
         is_emergency_contact: bool,
         nominator_name: str,
     ) -> Beneficiary:
-        # Enforce unique (user_id, email)
+        # Enforce unique (user_id, email) among non-removed rows only (L5):
+        # a removed beneficiary's email must be re-addable — removed rows are
+        # invisible in the UI, so a 409 here would be inexplicable to the user.
         existing = await self.db.execute(
             select(Beneficiary).where(
-                and_(Beneficiary.user_id == user_id, Beneficiary.email == email)
+                and_(
+                    Beneficiary.user_id == user_id,
+                    Beneficiary.email == email,
+                    Beneficiary.status != BeneficiaryStatus.removed,
+                )
             )
         )
         if existing.scalar_one_or_none():

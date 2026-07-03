@@ -108,9 +108,13 @@ export default function ResetPassword() {
       useCryptoStore.getState().setCek(cek)
       setSuccess(true)
     } catch (err) {
-      if (axios.isAxiosError(err) && err.response?.status === 400) {
-        // No recovery blob set up for this account (legacy account).
+      if (axios.isAxiosError(err) && err.response?.status === 404) {
+        // 404 = no recovery blob set up for this account (legacy account).
         setNoRecoveryBlob(true)
+      } else if (axios.isAxiosError(err) && err.response?.status === 400) {
+        // 400 = a recovery phrase IS set up but this one doesn't match (L1).
+        // Never route this to the data-loss path — the vault is recoverable.
+        setError('Incorrect recovery phrase. Check the spelling and word order — this must be the exact 24 words shown at setup.')
       } else if (axios.isAxiosError(err) && !err.response) {
         setError("Can't reach the server. Please try again.")
       } else if (axios.isAxiosError(err) && (err.response?.status === 401 || err.response?.status === 403)) {

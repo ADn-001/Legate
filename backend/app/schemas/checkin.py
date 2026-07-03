@@ -15,6 +15,9 @@ class CheckInSettingsResponse(BaseModel):
     interval_days: int
     grace_period_days: int
     next_dispatch_at: datetime | None
+    # L3/FR-44: dispatch clears next_dispatch_at, so the dashboard needs
+    # last_dispatched_at to detect the "check-in sent, awaiting confirm" state.
+    last_dispatched_at: datetime | None = None
     last_confirmed_at: datetime | None
     snooze_count: int
     snooze_limit: int

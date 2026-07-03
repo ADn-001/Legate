@@ -16,8 +16,9 @@ services:
     image: legate-backend:latest   # named so worker/beat can reuse it without a second build
     init: true   # tini as PID 1 — required so uvicorn's spawn-based multiprocess workers don't deadlock
     env_file: .env
-    ports:
-      - "8000:8000"
+    # No host port published (P4): all traffic goes through nginx. For local
+    # backend e2e runs, temporarily re-add `ports: ["8000:8000"]` or use
+    # `docker compose exec api pytest ...`.
     environment:
       - DATABASE_URL=${DATABASE_URL}
       - REDIS_URL=redis://redis:6379/0
@@ -56,7 +57,8 @@ services:
 
   worker:
     image: legate-backend:latest   # reuse api build — no separate pip install
-    command: celery -A app.worker.celery_app worker --loglevel=info
+    # CELERY_CONCURRENCY: default 2; set to 1 in .env on low-RAM hosts (≤1 GB).
+    command: celery -A app.worker.celery_app worker --loglevel=info --concurrency=${CELERY_CONCURRENCY:-2}
     env_file: .env
     environment:
       - DATABASE_URL=${DATABASE_URL}
@@ -116,8 +118,8 @@ services:
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
+    # No host port published (P4): redis has no auth and must stay
+    # compose-internal only.
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s

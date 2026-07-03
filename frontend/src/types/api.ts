@@ -56,6 +56,7 @@ export interface CheckinSchedule {
   interval_days: number
   grace_period_days: number
   next_dispatch_at: string | null
+  last_dispatched_at: string | null
   last_confirmed_at: string | null
   snooze_count: number
   snooze_limit: number

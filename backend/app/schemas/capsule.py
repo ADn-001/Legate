@@ -61,7 +61,13 @@ class CapsuleResponse(BaseModel):
 
 class MediaAttachmentResponse(BaseModel):
     id: uuid.UUID
-    kind: MediaType = Field(alias="type")
+    # validation_alias: populate from the ORM attribute `type`;
+    # serialization_alias: emit `kind` on the wire — FastAPI serializes
+    # response models by alias, and the entire frontend (types/api.ts
+    # MediaAttachment, MediaUploader, CapsuleView) reads `kind`. A plain
+    # alias="type" made responses emit `type`, silently breaking every
+    # frontend `a.kind` access.
+    kind: MediaType = Field(validation_alias="type", serialization_alias="kind")
     status: MediaStatus
     original_name: str
     mime_type: str

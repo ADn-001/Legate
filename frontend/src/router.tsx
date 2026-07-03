@@ -22,7 +22,11 @@ import CapsuleEditor from './pages/vault/CapsuleEditor'
 import CapsuleView from './pages/vault/CapsuleView'
 import Beneficiaries from './pages/people/Beneficiaries'
 import Security from './pages/security/Security'
-import Recover from './pages/security/Recover'
+// NOTE (L2, stowed): pages/security/Recover.tsx is intentionally unrouted —
+// it re-wrapped the CEK under a new password without updating the Supabase
+// login password, stranding users with diverged passwords. Forgot-password
+// goes through /auth/forgot-password → /auth/reset-password instead.
+// Re-route only after adding a backend endpoint that updates BOTH.
 import Activity from './pages/activity/Activity'
 import HowItWorks from './pages/static/HowItWorks'
 import Privacy from './pages/static/Privacy'
@@ -66,7 +70,6 @@ export function AppRouter() {
           <Route path="/vault/capsules/:id" element={<ProtectedRoute><CapsuleEditor /></ProtectedRoute>} />
           <Route path="/people" element={<ProtectedRoute><Beneficiaries /></ProtectedRoute>} />
           <Route path="/security" element={<ProtectedRoute><Security /></ProtectedRoute>} />
-          <Route path="/recover" element={<ProtectedRoute><Recover /></ProtectedRoute>} />
           <Route path="/activity" element={<ProtectedRoute><Activity /></ProtectedRoute>} />
 
           {/* Static pages (no auth required) */}

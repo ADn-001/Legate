@@ -10,7 +10,21 @@ import { getEventLabel } from '../../utils/audit'
 import { ActivityEntry, CheckinSchedule } from '../../types/api'
 
 function deriveVaultStatus(schedule: CheckinSchedule | undefined) {
-  if (!schedule?.next_dispatch_at) return { color: 'bg-[#22C55E]', label: 'VAULT STATUS: ACTIVE' }
+  if (!schedule) return { color: 'bg-[#22C55E]', label: 'VAULT STATUS: ACTIVE' }
+
+  // L3/FR-44: dispatch_due_checkins clears next_dispatch_at after sending, so
+  // "check-in email sent, not yet confirmed" is the state where next_dispatch_at
+  // is null and last_dispatched_at is newer than last_confirmed_at. That's the
+  // grace window — the one state that must never read as a healthy green.
+  const dispatched = schedule.last_dispatched_at ? new Date(schedule.last_dispatched_at).getTime() : null
+  const confirmed = schedule.last_confirmed_at ? new Date(schedule.last_confirmed_at).getTime() : null
+  if (dispatched !== null && (confirmed === null || confirmed < dispatched)) {
+    const graceEnd = dispatched + schedule.grace_period_days * 86400000
+    if (Date.now() > graceEnd) return { color: 'bg-red-500', label: 'VAULT STATUS: OVERDUE' }
+    return { color: 'bg-amber-400', label: 'VAULT STATUS: CHECK-IN PENDING' }
+  }
+
+  if (!schedule.next_dispatch_at) return { color: 'bg-[#22C55E]', label: 'VAULT STATUS: ACTIVE' }
   const diff = new Date(schedule.next_dispatch_at).getTime() - Date.now()
   if (diff < 0) return { color: 'bg-red-500', label: 'VAULT STATUS: OVERDUE' }
   if (diff < 3 * 86400000) return { color: 'bg-amber-400', label: 'VAULT STATUS: DUE SOON' }

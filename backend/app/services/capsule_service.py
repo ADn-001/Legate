@@ -19,7 +19,8 @@ from app.db.models.capsule import (
 )
 
 # Short-lived: these signed URLs are used immediately by the owner's browser
-# for in-app edit/view, unlike the 30-day delivery links sent to beneficiaries.
+# for in-app edit/view, unlike the longer-lived delivery links sent to
+# beneficiaries (see delivery_tasks.SIGNED_URL_EXPIRES_SECONDS).
 CONTENT_SIGNED_URL_EXPIRES_SECONDS = 3600
 
 

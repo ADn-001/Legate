@@ -35,4 +35,8 @@ except Exception:
 fi
 
 alembic upgrade head
-exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
+# --proxy-headers + --forwarded-allow-ips: trust X-Forwarded-For from nginx so
+# rate limiting keys on the real client IP, not the proxy container IP (P1).
+# The api container is only reachable via the compose network, so "*" is safe.
+# UVICORN_WORKERS: default 2; set to 1 in .env on low-RAM hosts (≤1 GB).
+exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers "${UVICORN_WORKERS:-2}" --proxy-headers --forwarded-allow-ips="*"

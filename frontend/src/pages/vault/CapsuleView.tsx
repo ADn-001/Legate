@@ -132,7 +132,18 @@ export default function CapsuleView() {
                   </p>
                 </div>
               ) : message ? (
-                <p className="text-[#0D1117] whitespace-pre-wrap break-words">{message}</p>
+                // C1: tiptap stores rich HTML — render it as HTML (self-authored,
+                // decrypted client-side; same trust model as the editor and the
+                // delivery preview, which both render it). Plain-text legacy
+                // content (no leading tag) keeps the whitespace-preserving <p>.
+                message.trim().startsWith('<') ? (
+                  <div
+                    className="prose prose-sm max-w-none text-[#0D1117] break-words"
+                    dangerouslySetInnerHTML={{ __html: message }}
+                  />
+                ) : (
+                  <p className="text-[#0D1117] whitespace-pre-wrap break-words">{message}</p>
+                )
               ) : (
                 <p className="text-sm text-[#6B7280]">This capsule has no message content yet.</p>
               )}
@@ -144,7 +155,21 @@ export default function CapsuleView() {
                 <Paperclip className="w-4 h-4" />
                 ATTACHMENTS
               </h2>
-              <p className="text-sm text-[#6B7280]">No media attachments.</p>
+              {capsule.media_attachments && capsule.media_attachments.length > 0 ? (
+                <ul className="space-y-2">
+                  {capsule.media_attachments.map((a) => (
+                    <li key={a.id} className="flex items-center gap-2 text-sm text-[#0D1117]">
+                      <Paperclip className="w-4 h-4 text-[#6B7280] flex-shrink-0" />
+                      <span className="truncate">{a.original_name}</span>
+                      <span className="text-xs text-[#6B7280] flex-shrink-0">
+                        ({a.kind}, {(a.size_bytes / (1024 * 1024)).toFixed(1)} MB)
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-sm text-[#6B7280]">No media attachments.</p>
+              )}
             </div>
           </>
         )}

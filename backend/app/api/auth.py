@@ -233,8 +233,11 @@ async def validate_recovery_phrase(
     it (T4.4)."""
     result = await db.execute(select(EncryptionKey).where(EncryptionKey.user_id == current_user.id))
     key = result.scalar_one_or_none()
+    # L1: 404 = no recovery phrase exists (frontend may offer the explicit
+    # data-loss reset path); 400 = a phrase exists but this one is wrong
+    # (frontend must NOT offer the data-loss path — the vault is recoverable).
     if not key or not key.recovery_phrase_hash or not key.recovery_encrypted_cek:
-        raise HTTPException(status_code=400, detail="No recovery phrase is set up for this account")
+        raise HTTPException(status_code=404, detail="No recovery phrase is set up for this account")
     if body.recovery_phrase_hash != key.recovery_phrase_hash:
         raise HTTPException(status_code=400, detail="Incorrect recovery phrase")
     return RecoveryKeyResponse(

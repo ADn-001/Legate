@@ -3,7 +3,8 @@ Celery tasks for triggering and executing the delivery pipeline.
 
 Phase 2 (B6 + B7):
   - ONE email per beneficiary, containing all their capsules ordered by
-    delivery_order (FR-39), with media rendered as 30-day signed links.
+    delivery_order (FR-39), with media rendered as 3-day signed links
+    (matching the 72h purge window — see SIGNED_URL_EXPIRES_SECONDS).
   - Per-recipient retry: failed sends are retried up to MAX_DELIVERY_ATTEMPTS
     times, RETRY_COUNTDOWN_SECONDS apart, re-sending ONLY failed recipients
     (FR-42). After the final failed attempt the trigger is marked failed, an
@@ -23,7 +24,11 @@ from app.worker.celery_app import celery_app
 
 MAX_DELIVERY_ATTEMPTS = 3
 RETRY_COUNTDOWN_SECONDS = 3600
-SIGNED_URL_EXPIRES_SECONDS = 30 * 24 * 3600  # 30 days (FR-39 media links)
+# P3: media link lifetime matches the FR-41 72h post-delivery purge — the
+# purge deletes the deliveries/ objects, so longer-lived URLs would dangle.
+# (FR-39's 30-day links are deferred pending a product decision; see
+# FINAL_AUDIT_REPORT.md §5.1.)
+SIGNED_URL_EXPIRES_SECONDS = 3 * 24 * 3600  # 3 days
 PURGE_COUNTDOWN_SECONDS = 259200  # 72h post-delivery content purge
 
 
@@ -350,7 +355,8 @@ def _decrypt_media_blob(encrypted: bytes, cek: bytes, cipher_iv: bytes) -> bytes
 
 async def _render_capsule_media(db, capsule, cek: bytes, trigger_id: str, cfg) -> str:
     """T1/Phase 4: decrypt each media attachment, upload a plaintext delivery copy
-    under deliveries/{trigger_id}/{att_id}/, sign a 30-day URL, and render HTML.
+    under deliveries/{trigger_id}/{att_id}/, sign a SIGNED_URL_EXPIRES_SECONDS
+    URL, and render HTML.
 
     Small photos (< 200 kB plaintext) are embedded as inline data: URIs so they
     appear directly in the email. Larger photos and all videos are gallery links.
@@ -401,7 +407,7 @@ async def _render_capsule_media(db, capsule, cek: bytes, trigger_id: str, cfg) -
                 {"content-type": mime, "upsert": "true"},
             )
 
-            # 4. Sign URL (30 days)
+            # 4. Sign URL (SIGNED_URL_EXPIRES_SECONDS)
             signed = storage.from_(cfg.supabase_storage_bucket_media).create_signed_url(
                 delivery_path, SIGNED_URL_EXPIRES_SECONDS
             )
@@ -420,21 +426,21 @@ async def _render_capsule_media(db, capsule, cek: bytes, trigger_id: str, cfg) -
                     parts.append(
                         f'<p><img src="data:{mime};base64,{b64}" alt="{name}" '
                         f'style="max-width:100%;border-radius:6px"><br>'
-                        f'<a href="{url}">{name}</a> (download, valid 30 days)</p>'
+                        f'<a href="{url}">{name}</a> (download, valid 3 days)</p>'
                     )
                 else:
                     parts.append(
                         f'<p><img src="{url}" alt="{name}" style="max-width:100%;border-radius:6px">'
-                        f'<br><a href="{url}">{name}</a> (link valid 30 days)</p>'
+                        f'<br><a href="{url}">{name}</a> (link valid 3 days)</p>'
                     )
             except Exception:
                 parts.append(
-                    f'<p><a href="{url}">{name}</a> (photo, link valid 30 days)</p>'
+                    f'<p><a href="{url}">{name}</a> (photo, link valid 3 days)</p>'
                 )
         else:
             parts.append(
                 f'<p>&#x1F3A5; <a href="{url}">{name}</a>'
-                f' &mdash; video, link valid for 30 days</p>'
+                f' &mdash; video, link valid for 3 days</p>'
             )
 
     parts.append("</div>")

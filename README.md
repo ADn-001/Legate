@@ -11,6 +11,11 @@ Digital estate planning — compose messages for the people you love, delivered 
 ```bash
 cp .env.example .env
 # Fill in the values — see the Environment variables table below
+
+# Build the frontend first — the nginx image copies the pre-built dist/
+# (requires Node 20+; VITE_API_BASE_URL=/api is set via frontend/.env.production)
+cd frontend && npm ci && npm run build && cd ..
+
 docker compose up -d --build
 ```
 
@@ -36,13 +41,12 @@ All three must be **private**.
 | `media-attachments` | Photo and video uploads |
 | `thumbnails` | Auto-generated image thumbnails |
 
-### 2. Apply RLS policies
+### 2. Row Level Security (deferred)
 
-```bash
-# From the project root — requires psql on PATH, or paste the file into
-# the Supabase SQL editor (Dashboard → SQL Editor → New query).
-psql "$DATABASE_URL" -f supabase/rls_policies.sql
-```
+> **Note:** the backend accesses the database and storage exclusively with the
+> service-role key, so RLS policies are not required for the app to function.
+> Authoring and applying RLS policies (NFR-14, defense-in-depth) is a
+> **pre-public-launch TODO** — see `FINAL_AUDIT_REPORT.md` (D2).
 
 ### 3. Enable email OTP auth
 
@@ -55,10 +59,10 @@ In the Supabase Dashboard → **Authentication → Providers → Email**, enable
 Dashboard → **Authentication → URL Configuration → Redirect URLs**, add:
 
 ```
-https://<your-host>/reset-password
+https://<your-host>/auth/reset-password
 ```
 
-(Locally: `http://localhost/reset-password` or `http://localhost:8080/reset-password`.)
+(Locally: `http://localhost/auth/reset-password` or `http://localhost:8080/auth/reset-password`.)
 
 ---
 
