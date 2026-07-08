@@ -17,6 +17,7 @@ from fastapi import HTTPException, status as http_status
 from app.config import get_settings
 from app.core.supabase import get_supabase, get_supabase_admin
 from app.core.audit import write_audit
+from app.core.scheduling import interval_delta
 from app.db.models.user import User, UserSettings, EncryptionKey, UserStatus
 from app.db.models.checkin import CheckInSchedule
 
@@ -176,7 +177,7 @@ class AuthService:
         )
         schedule = result2.scalar_one_or_none()
         if schedule:
-            schedule.next_dispatch_at = datetime.now(timezone.utc) + timedelta(days=schedule.interval_days)
+            schedule.next_dispatch_at = datetime.now(timezone.utc) + interval_delta(schedule)
 
         await write_audit(self.db, "email_verified", user_id=user.id)
         await self.db.commit()

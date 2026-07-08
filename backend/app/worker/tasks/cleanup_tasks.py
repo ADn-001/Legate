@@ -17,6 +17,7 @@ import logging
 from datetime import datetime, timezone
 
 from app.worker.celery_app import celery_app
+from app.worker.async_utils import run_async_task
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +107,7 @@ async def _capsule_ids_for_user(db, user_id: str) -> list[str]:
 )
 def purge_capsule_storage(self, capsule_id: str):
     try:
-        asyncio.run(_purge_capsule_storage(capsule_id))
+        asyncio.run(run_async_task(_purge_capsule_storage(capsule_id)))
     except Exception as exc:
         raise self.retry(exc=exc)
 
@@ -156,7 +157,7 @@ async def _purge_capsule_storage(capsule_id: str):
 )
 def purge_user_storage(self, user_id: str, trigger_id: str | None = None):
     try:
-        asyncio.run(_purge_user_storage(user_id, trigger_id=trigger_id))
+        asyncio.run(run_async_task(_purge_user_storage(user_id, trigger_id=trigger_id)))
     except Exception as exc:
         raise self.retry(exc=exc)
 
@@ -205,7 +206,7 @@ async def _purge_user_storage(user_id: str, trigger_id: str | None = None):
 )
 def purge_user_account(self, user_id: str):
     try:
-        asyncio.run(_purge_user_account(user_id))
+        asyncio.run(run_async_task(_purge_user_account(user_id)))
     except Exception as exc:
         raise self.retry(exc=exc)
 

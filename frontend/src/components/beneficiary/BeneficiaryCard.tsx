@@ -1,4 +1,4 @@
-import { Edit2, Trash2 } from 'lucide-react'
+import { BellOff, Edit2, Trash2 } from 'lucide-react'
 import Badge from '../ui/Badge'
 import { Beneficiary } from '../../types/api'
 
@@ -16,24 +16,20 @@ export default function BeneficiaryCard({ beneficiary, onEdit, onDelete }: Benef
     .toUpperCase()
     .slice(0, 2)
 
-  const isPending = beneficiary.status === 'pending'
+  // NULL invited_at ⇒ the beneficiary was added silently (no email sent).
+  const isSilent = beneficiary.invited_at === null
 
   return (
-    <div
-      className={`bg-white rounded-2xl shadow-md p-6 flex items-start justify-between hover:shadow-lg transition-shadow ${isPending ? 'border-2 border-dashed border-gray-300' : ''}`}
-    >
+    <div className="bg-white rounded-2xl shadow-md p-6 flex items-start justify-between hover:shadow-lg transition-shadow">
       <div className="flex items-center gap-4 flex-1 min-w-0">
         <div className="w-12 h-12 bg-gradient-to-br from-blue-400 to-blue-600 rounded-full flex items-center justify-center text-white font-bold text-lg flex-shrink-0">
           {initials}
         </div>
         <div className="flex-1 min-w-0">
-          <h3 className={`font-semibold text-[#0D1117] text-lg ${isPending ? 'italic' : ''}`}>
+          <h3 className="font-semibold text-[#0D1117] text-lg">
             {beneficiary.full_name}
           </h3>
           <p className="text-sm text-[#6B7280] truncate">{beneficiary.email}</p>
-          {isPending && (
-            <p className="text-xs text-amber-600 mt-1">Invite pending...</p>
-          )}
           <div className="flex gap-2 mt-2 flex-wrap">
             {beneficiary.relationship && (
               <Badge variant="default">{beneficiary.relationship}</Badge>
@@ -41,7 +37,12 @@ export default function BeneficiaryCard({ beneficiary, onEdit, onDelete }: Benef
             {beneficiary.is_emergency_contact && (
               <Badge variant="info">Emergency Contact</Badge>
             )}
-            {isPending && <Badge variant="warning">Pending</Badge>}
+            {isSilent && (
+              <Badge variant="default">
+                <BellOff className="w-3 h-3 inline-block mr-1 -mt-0.5" />
+                Added silently
+              </Badge>
+            )}
           </div>
         </div>
       </div>

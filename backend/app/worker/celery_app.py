@@ -26,17 +26,21 @@ celery_app.conf.update(
     timezone="UTC",
     enable_utc=True,
     beat_schedule={
+        # Phase B: tick interval is configurable (BEAT_INTERVAL_SECONDS,
+        # default 3600 = hourly, unchanged) so demo-mode minute-level
+        # schedules actually fire promptly. send-grace-reminders is left at
+        # a fixed 12h — it self-skips minute-mode users (see checkin_tasks.py).
         "dispatch-checkin-emails": {
             "task": "app.worker.tasks.checkin_tasks.dispatch_due_checkins",
-            "schedule": 3600.0,
+            "schedule": float(cfg.beat_interval_seconds),
         },
         "check-grace-periods": {
             "task": "app.worker.tasks.checkin_tasks.check_grace_periods",
-            "schedule": 3600.0,
+            "schedule": float(cfg.beat_interval_seconds),
         },
         "process-pending-triggers": {
             "task": "app.worker.tasks.checkin_tasks.process_pending_triggers",
-            "schedule": 3600.0,
+            "schedule": float(cfg.beat_interval_seconds),
         },
         "send-grace-reminders": {
             "task": "app.worker.tasks.checkin_tasks.send_grace_period_reminders",

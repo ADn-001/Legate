@@ -50,6 +50,18 @@ class CheckInSchedule(Base, TimestampMixin):
     user_id: MappedColumn[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True)
     interval_days: MappedColumn[int] = mapped_column(Integer, nullable=False)
     grace_period_days: MappedColumn[int] = mapped_column(Integer, nullable=False)
+    # Phase B: demo-mode minute-level overrides. NULL (the default) means "use
+    # the day-based columns above" — normal-mode behavior is untouched. When
+    # non-NULL, these take precedence (see app/core/scheduling.py). Writable
+    # only when DEMO_MODE=true (server-enforced in app/api/settings.py).
+    check_interval_minutes: MappedColumn[int | None] = mapped_column(Integer, nullable=True)
+    grace_period_minutes: MappedColumn[int | None] = mapped_column(Integer, nullable=True)
+    # Phase B (extension): demo-mode override for the FR-23 emergency-contact
+    # confirmation window (normally EMERGENCY_CONFIRMATION_WINDOW_HOURS = 48h,
+    # hardcoded in checkin_tasks.py). NULL means "use the 48h default" — see
+    # app/core/scheduling.py::emergency_confirm_delta. Writable only when
+    # DEMO_MODE=true, same as the two columns above.
+    emergency_confirm_minutes: MappedColumn[int | None] = mapped_column(Integer, nullable=True)
     next_dispatch_at: MappedColumn[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     last_dispatched_at: MappedColumn[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_confirmed_at: MappedColumn[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

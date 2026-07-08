@@ -8,7 +8,8 @@ import Modal from '../../components/ui/Modal'
 const intervalOptions = [7, 14, 30, 60]
 const graceOptions = [3, 7, 14, 30]
 
-const MIN_CUSTOM_INTERVAL = 7
+// B4/FR-11: floor lowered from 7 to 1 day (permanent, all environments).
+const MIN_CUSTOM_INTERVAL = 1
 const MAX_CUSTOM_INTERVAL = 365
 // Warn if the total window (interval + grace) drops below this many days
 const SHORT_WINDOW_WARNING_DAYS = 14

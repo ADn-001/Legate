@@ -165,6 +165,15 @@ def test_beneficiary_create_valid():
     obj = BeneficiaryCreate(full_name="Jane Doe", email="jane@example.com")
     assert obj.is_emergency_contact is False
     assert obj.relationship is None
+    # Notification defaults to on — silent add is opt-in.
+    assert obj.notify_beneficiary is True
+
+
+def test_beneficiary_create_silent():
+    obj = BeneficiaryCreate(
+        full_name="Jane Doe", email="jane@example.com", notify_beneficiary=False
+    )
+    assert obj.notify_beneficiary is False
 
 
 def test_beneficiary_create_invalid_email_raises():
@@ -217,6 +226,23 @@ def test_beneficiary_response_valid():
         created_at=datetime.now(timezone.utc),
     )
     assert obj.status == BeneficiaryStatus.active
+    # invited_at is optional; None ⇒ silently-added beneficiary.
+    assert obj.invited_at is None
+
+
+def test_beneficiary_response_invited_at_roundtrip():
+    now = datetime.now(timezone.utc)
+    obj = BeneficiaryResponse(
+        id=uuid.uuid4(),
+        full_name="Jane Doe",
+        email="jane@example.com",
+        relationship=None,
+        is_emergency_contact=False,
+        status=BeneficiaryStatus.active,
+        invited_at=now,
+        created_at=now,
+    )
+    assert obj.invited_at == now
 
 
 # ---------------------------------------------------------------------------
@@ -305,10 +331,10 @@ def test_checkin_settings_update_partial():
     assert obj.interval_days == 30
 
 
-# B15 / FR-11: interval bounded to 7–365 days
+# B4/FR-11: interval floor lowered from 7 to 1 day (permanent, all envs)
 def test_checkin_settings_update_interval_below_min_raises():
     with pytest.raises(ValidationError):
-        CheckInSettingsUpdate(interval_days=6)
+        CheckInSettingsUpdate(interval_days=0)
 
 
 def test_checkin_settings_update_interval_above_max_raises():
@@ -317,19 +343,86 @@ def test_checkin_settings_update_interval_above_max_raises():
 
 
 def test_checkin_settings_update_interval_bounds_accepted():
-    assert CheckInSettingsUpdate(interval_days=7).interval_days == 7
+    assert CheckInSettingsUpdate(interval_days=1).interval_days == 1
     assert CheckInSettingsUpdate(interval_days=365).interval_days == 365
 
 
-# B15 / FR-12: grace period restricted to {3, 7, 14, 30}
-def test_checkin_settings_update_grace_invalid_value_raises():
+# B4/FR-12: grace period widened from Literal[3,7,14,30] to any int 1-30 —
+# the frontend keeps offering the four presets, but the API no longer
+# rejects other values.
+def test_checkin_settings_update_grace_now_accepts_arbitrary_value():
+    assert CheckInSettingsUpdate(grace_period_days=5).grace_period_days == 5
+
+
+def test_checkin_settings_update_grace_below_min_raises():
     with pytest.raises(ValidationError):
-        CheckInSettingsUpdate(grace_period_days=5)
+        CheckInSettingsUpdate(grace_period_days=0)
+
+
+def test_checkin_settings_update_grace_above_max_raises():
+    with pytest.raises(ValidationError):
+        CheckInSettingsUpdate(grace_period_days=31)
 
 
 def test_checkin_settings_update_grace_valid_values_accepted():
     for value in (3, 7, 14, 30):
         assert CheckInSettingsUpdate(grace_period_days=value).grace_period_days == value
+
+
+# Phase B: demo-mode minute overrides
+def test_checkin_settings_update_minutes_default_none():
+    obj = CheckInSettingsUpdate()
+    assert obj.check_interval_minutes is None
+    assert obj.grace_period_minutes is None
+    assert obj.clear_minute_overrides is False
+
+
+def test_checkin_settings_update_minutes_bounds_accepted():
+    assert CheckInSettingsUpdate(check_interval_minutes=1).check_interval_minutes == 1
+    assert CheckInSettingsUpdate(check_interval_minutes=1440).check_interval_minutes == 1440
+    assert CheckInSettingsUpdate(grace_period_minutes=1).grace_period_minutes == 1
+    assert CheckInSettingsUpdate(grace_period_minutes=1440).grace_period_minutes == 1440
+
+
+def test_checkin_settings_update_interval_minutes_below_min_raises():
+    with pytest.raises(ValidationError):
+        CheckInSettingsUpdate(check_interval_minutes=0)
+
+
+def test_checkin_settings_update_interval_minutes_above_max_raises():
+    with pytest.raises(ValidationError):
+        CheckInSettingsUpdate(check_interval_minutes=1441)
+
+
+def test_checkin_settings_update_grace_minutes_below_min_raises():
+    with pytest.raises(ValidationError):
+        CheckInSettingsUpdate(grace_period_minutes=0)
+
+
+def test_checkin_settings_update_grace_minutes_above_max_raises():
+    with pytest.raises(ValidationError):
+        CheckInSettingsUpdate(grace_period_minutes=1441)
+
+
+# Phase B (extension): demo-mode override for the FR-23 emergency-contact
+# confirmation window
+def test_checkin_settings_update_emergency_confirm_minutes_default_none():
+    assert CheckInSettingsUpdate().emergency_confirm_minutes is None
+
+
+def test_checkin_settings_update_emergency_confirm_minutes_bounds_accepted():
+    assert CheckInSettingsUpdate(emergency_confirm_minutes=1).emergency_confirm_minutes == 1
+    assert CheckInSettingsUpdate(emergency_confirm_minutes=1440).emergency_confirm_minutes == 1440
+
+
+def test_checkin_settings_update_emergency_confirm_minutes_below_min_raises():
+    with pytest.raises(ValidationError):
+        CheckInSettingsUpdate(emergency_confirm_minutes=0)
+
+
+def test_checkin_settings_update_emergency_confirm_minutes_above_max_raises():
+    with pytest.raises(ValidationError):
+        CheckInSettingsUpdate(emergency_confirm_minutes=1441)
 
 
 # ---------------------------------------------------------------------------

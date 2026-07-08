@@ -48,6 +48,8 @@ export interface Beneficiary {
   relationship?: string
   is_emergency_contact: boolean
   status: 'active' | 'pending' | 'removed'
+  /** NULL ⇒ added silently (no notification email was sent) */
+  invited_at: string | null
   created_at: string
   updated_at: string
 }
@@ -55,11 +57,20 @@ export interface Beneficiary {
 export interface CheckinSchedule {
   interval_days: number
   grace_period_days: number
+  // Phase B: demo-mode overrides. Non-null means "this cycle is running on
+  // minutes, not days" — takes precedence over the day fields above.
+  check_interval_minutes: number | null
+  grace_period_minutes: number | null
+  // Phase B (extension): demo-mode override for the FR-23 emergency-contact
+  // 48h confirmation window.
+  emergency_confirm_minutes: number | null
   next_dispatch_at: string | null
   last_dispatched_at: string | null
   last_confirmed_at: string | null
   snooze_count: number
   snooze_limit: number
+  // Whether the server has DEMO_MODE enabled at all.
+  demo_mode?: boolean
 }
 
 export interface StorageUsage {

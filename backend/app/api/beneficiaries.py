@@ -38,6 +38,7 @@ async def add_beneficiary(
         relationship=body.relationship,
         is_emergency_contact=body.is_emergency_contact,
         nominator_name=current_user.full_name or current_user.email,
+        notify=body.notify_beneficiary,
     )
 
 

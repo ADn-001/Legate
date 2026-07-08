@@ -5,6 +5,8 @@ export interface BeneficiaryCreatePayload {
   email: string
   relationship?: string
   is_emergency_contact?: boolean
+  /** false ⇒ silent add: no notification email is sent (create only) */
+  notify_beneficiary?: boolean
 }
 
 export const beneficiariesApi = {

@@ -8,23 +8,27 @@ Lifecycle (Phase 2, B1-B8):
   check_grace_periods        — hourly; creates ONE release trigger per missed
                                check-in cycle. With an emergency contact the
                                trigger starts as pending_confirmation with a
-                               48h window (FR-23/24); otherwise it goes
-                               straight to processing.
+                               48h window (FR-23/24, demo-mode minute override
+                               via emergency_confirm_minutes — see
+                               app/core/scheduling.py::emergency_confirm_delta);
+                               otherwise it goes straight to processing.
   process_pending_triggers   — hourly; promotes pending_confirmation triggers
-                               whose 48h window elapsed to processing and
-                               enqueues delivery.
+                               whose window elapsed to processing and enqueues
+                               delivery.
   send_grace_period_reminders — every 12h; escalating reminders at grace day 3
                                and day 7, at most once per threshold per cycle.
 """
 
 import asyncio
+import logging
 import secrets
 from datetime import datetime, timedelta, timezone
 
 from app.worker.celery_app import celery_app
+from app.worker.async_utils import run_async_task
+from app.core.scheduling import grace_delta, emergency_confirm_delta
 
-# Hours an emergency contact has to pause delivery before it proceeds (FR-23).
-EMERGENCY_CONFIRMATION_WINDOW_HOURS = 48
+logger = logging.getLogger(__name__)
 
 # Grace-day thresholds for escalating reminders (FR-16).
 GRACE_REMINDER_THRESHOLDS = (3, 7)
@@ -35,7 +39,7 @@ PAUSE_EXTENSION_DAYS = 7
 
 @celery_app.task(name="app.worker.tasks.checkin_tasks.dispatch_due_checkins")
 def dispatch_due_checkins():
-    asyncio.run(_dispatch_due_checkins())
+    asyncio.run(run_async_task(_dispatch_due_checkins()))
 
 
 async def _dispatch_due_checkins():
@@ -100,6 +104,13 @@ async def _dispatch_due_checkins():
                     snoozes_remaining=schedule.snooze_limit - schedule.snooze_count,
                 )
             except Exception:
+                # Never block the loop on one bad send (next_dispatch_at stays
+                # armed so this schedule is retried on the next beat tick), but
+                # log it — this used to fail completely silently.
+                logger.exception(
+                    "send_checkin_email failed for user_id=%s schedule_id=%s",
+                    user.id, schedule.id,
+                )
                 continue
 
             for token_type, token_value in tokens.items():
@@ -125,7 +136,7 @@ async def _dispatch_due_checkins():
 
 @celery_app.task(name="app.worker.tasks.checkin_tasks.check_grace_periods")
 def check_grace_periods():
-    asyncio.run(_check_grace_periods())
+    asyncio.run(run_async_task(_check_grace_periods()))
 
 
 def _as_utc(dt):
@@ -173,8 +184,14 @@ async def _check_grace_periods():
             if not dispatched_at:
                 continue
 
-            grace_deadline = dispatched_at + timedelta(
-                days=schedule.grace_period_days + PAUSE_EXTENSION_DAYS * (schedule.pause_count or 0)
+            # B3: base grace comes from grace_delta (day- or minute-based per
+            # schedule); the emergency-pause extension is intentionally
+            # always in days — it's an emergency-contact feature, not
+            # demo-relevant.
+            grace_deadline = (
+                dispatched_at
+                + grace_delta(schedule)
+                + timedelta(days=PAUSE_EXTENSION_DAYS * (schedule.pause_count or 0))
             )
 
             confirmed_at = _as_utc(schedule.last_confirmed_at)
@@ -218,7 +235,7 @@ async def _check_grace_periods():
             emergency_contact = contact_result.scalars().first()
 
             if emergency_contact:
-                deliver_after = now + timedelta(hours=EMERGENCY_CONFIRMATION_WINDOW_HOURS)
+                deliver_after = now + emergency_confirm_delta(schedule)
                 trigger = ReleaseTrigger(
                     user_id=schedule.user_id,
                     triggered_at=now,
@@ -254,7 +271,12 @@ async def _check_grace_periods():
                 except Exception:
                     # Email failure must not lose the 48h window; the trigger
                     # still promotes after deliver_after (at-least-once, NFR-07).
-                    pass
+                    # Logged (not just swallowed) so a persistent failure (bad
+                    # DNS, Resend outage, etc.) is visible in worker logs.
+                    logger.exception(
+                        "send_emergency_pause_email failed for schedule_id=%s trigger_id=%s",
+                        schedule.id, trigger.id,
+                    )
 
                 await write_audit(
                     db, "delivery_pending_confirmation",
@@ -279,7 +301,7 @@ async def _check_grace_periods():
 
 @celery_app.task(name="app.worker.tasks.checkin_tasks.process_pending_triggers")
 def process_pending_triggers():
-    asyncio.run(_process_pending_triggers())
+    asyncio.run(run_async_task(_process_pending_triggers()))
 
 
 async def _process_pending_triggers():
@@ -317,7 +339,7 @@ async def _process_pending_triggers():
 
 @celery_app.task(name="app.worker.tasks.checkin_tasks.send_grace_period_reminders")
 def send_grace_period_reminders():
-    asyncio.run(_send_grace_period_reminders())
+    asyncio.run(run_async_task(_send_grace_period_reminders()))
 
 
 async def _send_grace_period_reminders():
@@ -360,7 +382,12 @@ async def _send_grace_period_reminders():
             if not dispatched_at:
                 continue
 
-            grace_deadline = dispatched_at + timedelta(days=schedule.grace_period_days)
+            # B3: day-threshold reminder logic is meaningless for a
+            # minutes-long demo cycle — skip minute-mode schedules entirely.
+            if schedule.grace_period_minutes:
+                continue
+
+            grace_deadline = dispatched_at + grace_delta(schedule)
             days_into_grace = (now - dispatched_at).days
 
             confirmed_at = _as_utc(schedule.last_confirmed_at)
@@ -394,6 +421,10 @@ async def _send_grace_period_reminders():
             try:
                 send_grace_period_reminder(to=user.email, days_remaining=days_remaining, confirm_url=confirm_url)
             except Exception:
+                logger.exception(
+                    "send_grace_period_reminder failed for user_id=%s schedule_id=%s",
+                    user.id, schedule.id,
+                )
                 continue
 
             expires_at = now + timedelta(days=max(days_remaining, 1))

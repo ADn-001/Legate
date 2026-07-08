@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 import pytest
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy import select
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.pool import NullPool
 
@@ -83,7 +84,11 @@ _test_engine = create_async_engine(
                            # EAUTHTIMEOUT from PgBouncer saturation is handled by the
                            # asyncpg.connect monkey-patch above (4 retries, 10/20/30 s backoff).
     echo=False,
-    connect_args={"timeout": 120},
+    # statement_cache_size=0: asyncpg's prepared-statement cache breaks behind
+    # PgBouncer/Supavisor transaction pooling and can surface as
+    # ConnectionDoesNotExistError mid-prepare. Disabling it is harmless on
+    # direct (session-mode) connections and required through the pooler.
+    connect_args={"timeout": 120, "statement_cache_size": 0},
 )
 AsyncSessionLocal = async_sessionmaker(_test_engine, expire_on_commit=False, class_=AsyncSession)
 
@@ -272,17 +277,25 @@ async def registered_user(http):
     email = make_test_email()
     password = TEST_PASSWORD
 
-    res = await http.post("/auth/signup", json={
-        "email": email,
-        "password": password,
-        "encrypted_cek": _SIGNUP_CEK,
-        "cek_iv": _SIGNUP_IV,
-        "pbkdf2_salt": _SIGNUP_SALT,
-        "delivery_encrypted_cek": _SIGNUP_DCEK,
-        "delivery_cek_iv": _SIGNUP_DIV,
-    })
+    # DBAPIError here = Supabase killed the DB connection mid-request
+    # (free-tier pool saturation / reclaim — see asyncpg patch above). The
+    # signup may have partially completed (Supabase Auth user created, local
+    # rows missing), so fall through to _create_user_via_admin, which handles
+    # exactly that partial state ("already been registered" branch).
+    try:
+        res = await http.post("/auth/signup", json={
+            "email": email,
+            "password": password,
+            "encrypted_cek": _SIGNUP_CEK,
+            "cek_iv": _SIGNUP_IV,
+            "pbkdf2_salt": _SIGNUP_SALT,
+            "delivery_encrypted_cek": _SIGNUP_DCEK,
+            "delivery_cek_iv": _SIGNUP_DIV,
+        })
+    except (DBAPIError, OSError):
+        res = None
 
-    if res.status_code in (429, 503):
+    if res is None or res.status_code in (429, 503):
         # Rate-limited or Supabase auth timeout: create via admin API (no email send).
         await _create_user_via_admin(email, password)
     else:
@@ -306,13 +319,23 @@ async def registered_user(http):
 
     # Retry login with backoff — Supabase takes a moment to propagate email
     # confirmation (or admin user creation) before sign_in_with_password works.
+    # Also retry on DBAPIError/OSError: with NullPool every attempt opens a
+    # fresh asyncpg connection, so a mid-query connection kill (pool
+    # saturation) is transient and a retry usually lands on a healthy slot.
     login_res = None
+    last_exc = None
     for _attempt in range(5):
-        login_res = await http.post("/auth/login", json={"email": email, "password": password})
-        if login_res.status_code == 200:
-            break
+        try:
+            login_res = await http.post("/auth/login", json={"email": email, "password": password})
+            last_exc = None
+            if login_res.status_code == 200:
+                break
+        except (DBAPIError, OSError) as exc:
+            last_exc = exc
         if _attempt < 4:
             await asyncio.sleep(5 * (_attempt + 1))  # 5 s, 10 s, 15 s, 20 s
+    if last_exc is not None and (login_res is None or login_res.status_code != 200):
+        raise AssertionError(f"Login failed after retries: DB connection kept dropping: {last_exc}")
     assert login_res is not None and login_res.status_code == 200, (
         f"Login failed after retries: {login_res.text if login_res else 'no response'}"
     )

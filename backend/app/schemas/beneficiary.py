@@ -11,6 +11,9 @@ class BeneficiaryCreate(BaseModel):
     email: EmailStr
     relationship: str | None = None
     is_emergency_contact: bool = False
+    # Silent add: when False, no nomination email is sent and invited_at
+    # stays NULL (the frontend renders these as "Added silently").
+    notify_beneficiary: bool = True
 
 
 class BeneficiaryUpdate(BaseModel):
@@ -28,6 +31,8 @@ class BeneficiaryResponse(BaseModel):
     relationship: str | None = Field(None, validation_alias="relationship_type")
     is_emergency_contact: bool
     status: BeneficiaryStatus
+    # NULL ⇒ the beneficiary was added silently (no notification email).
+    invited_at: datetime | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True, "populate_by_name": True}

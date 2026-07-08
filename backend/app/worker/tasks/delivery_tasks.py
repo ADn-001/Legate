@@ -18,9 +18,13 @@ Phase 2 (B6 + B7):
 
 import asyncio
 import html as html_mod
+import logging
 from datetime import datetime, timezone
 
 from app.worker.celery_app import celery_app
+from app.worker.async_utils import run_async_task
+
+logger = logging.getLogger(__name__)
 
 MAX_DELIVERY_ATTEMPTS = 3
 RETRY_COUNTDOWN_SECONDS = 3600
@@ -36,7 +40,7 @@ PURGE_COUNTDOWN_SECONDS = 259200  # 72h post-delivery content purge
 def execute_delivery(self, trigger_id: str):
     """First delivery attempt for a release trigger."""
     try:
-        asyncio.run(_run_delivery(trigger_id, attempt=1))
+        asyncio.run(run_async_task(_run_delivery(trigger_id, attempt=1)))
     except Exception as exc:
         # Infrastructure-level failure (DB down etc.) — retry the whole task.
         raise self.retry(exc=exc, countdown=RETRY_COUNTDOWN_SECONDS)
@@ -46,7 +50,7 @@ def execute_delivery(self, trigger_id: str):
 def retry_failed_deliveries(self, trigger_id: str, attempt: int):
     """Re-send ONLY recipients whose previous attempts failed (B6/FR-42)."""
     try:
-        asyncio.run(_run_delivery(trigger_id, attempt=attempt))
+        asyncio.run(run_async_task(_run_delivery(trigger_id, attempt=attempt)))
     except Exception as exc:
         raise self.retry(exc=exc, countdown=RETRY_COUNTDOWN_SECONDS)
 
@@ -108,7 +112,7 @@ async def _run_delivery(trigger_id: str, attempt: int):
                         body_text=f"Trigger: {trigger_id}\nUser: {user.id}\nReason: no delivery_encrypted_cek/delivery_cek_iv",
                     )
                 except Exception:
-                    pass
+                    logger.exception("send_alert_email failed for trigger_id=%s (missing key material)", trigger_id)
             return
 
         # Derive wrapping key and decrypt CEK (AES-GCM)
@@ -206,6 +210,10 @@ async def _run_delivery(trigger_id: str, attempt: int):
                         last_attempt_at=now,
                     ))
             except Exception as exc:
+                logger.exception(
+                    "send_delivery_email failed for beneficiary=%s trigger_id=%s attempt=%s",
+                    beneficiary.email, trigger.id, attempt,
+                )
                 failed_beneficiaries.append(beneficiary.email)
                 for _capsule, recipient in pending_pairs:
                     recipient.status = RecipientStatus.failed
@@ -258,7 +266,7 @@ async def _run_delivery(trigger_id: str, attempt: int):
                         ),
                     )
                 except Exception:
-                    pass
+                    logger.exception("send_alert_email failed for trigger_id=%s (permanent failure)", trigger_id)
             _schedule_post_delivery_purge(str(user.id), str(trigger.id))
 
 
@@ -296,10 +304,20 @@ def _sanitize_html(text: str) -> str:
 
 
 def _build_capsule_html(capsule, cek: bytes, supabase, cfg, media_html: str = "") -> str:
-    """Render one capsule section: escaped title + decrypted, sanitized content + media."""
+    """Render one capsule section as a bordered sub-card: escaped title +
+    decrypted, sanitized content + media.
+
+    Phase C: styled as a bordered white sub-card (matches the app's design
+    system — see backend/app/core/email.py header docstring) so a
+    multi-capsule delivery email reads as distinct messages rather than one
+    run-on block. Inline styles only (Gmail/Outlook strip <style> blocks).
+    """
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-    parts = [f"<h3>{html_mod.escape(capsule.title or '')}</h3>"]
+    inner = [
+        '<h3 style="font-family:Helvetica,Arial,sans-serif;font-size:16px;font-weight:700;'
+        f'color:#0D1117;margin:0 0 12px 0;">{html_mod.escape(capsule.title or "")}</h3>'
+    ]
 
     if capsule.storage_object_path and capsule.cipher_iv:
         try:
@@ -312,14 +330,25 @@ def _build_capsule_html(capsule, cek: bytes, supabase, cfg, media_html: str = ""
                 text = plaintext.decode("utf-8", errors="replace")
                 # T9.4: sanitize with bleach allowlist; Phase 5 S3 extends/verifies.
                 sanitized = _sanitize_html(text)
-                parts.append(f"<div class='capsule-body'>{sanitized}</div>")
+                inner.append(
+                    '<div style="font-family:Helvetica,Arial,sans-serif;font-size:14px;'
+                    f'line-height:1.6;color:#374151;">{sanitized}</div>'
+                )
         except Exception:
-            parts.append("<p><em>[Content could not be decrypted]</em></p>")
+            inner.append(
+                '<p style="font-family:Helvetica,Arial,sans-serif;font-size:14px;color:#6B7280;'
+                'font-style:italic;margin:0;">[Content could not be decrypted]</p>'
+            )
 
     if media_html:
-        parts.append(media_html)
+        inner.append(media_html)
 
-    return "".join(parts)
+    return (
+        '<div style="border:1px solid #E5E7EB;border-radius:12px;padding:16px;'
+        'margin-bottom:16px;background-color:#ffffff;">'
+        + "".join(inner)
+        + "</div>"
+    )
 
 
 def _decrypt_media_blob(encrypted: bytes, cek: bytes, cipher_iv: bytes) -> bytes:
@@ -381,7 +410,7 @@ async def _render_capsule_media(db, capsule, cek: bytes, trigger_id: str, cfg) -
         return ""
 
     storage = get_storage()
-    parts = ['<div class="media">']
+    parts = ['<div style="margin-top:12px;">']
 
     for att in attachments:
         name = html_mod.escape(att.original_name or "attachment")
@@ -424,23 +453,27 @@ async def _render_capsule_media(db, capsule, cek: bytes, trigger_id: str, cfg) -
                 if len(plaintext) < 200_000:
                     b64 = base64.b64encode(plaintext).decode()
                     parts.append(
-                        f'<p><img src="data:{mime};base64,{b64}" alt="{name}" '
-                        f'style="max-width:100%;border-radius:6px"><br>'
-                        f'<a href="{url}">{name}</a> (download, valid 3 days)</p>'
+                        f'<p style="margin:0 0 8px 0;"><img src="data:{mime};base64,{b64}" alt="{name}" '
+                        'style="max-width:100%;border-radius:8px;display:block;margin-bottom:6px;"><br>'
+                        f'<a href="{url}" style="color:#2563EB;font-size:13px;">{name}</a> '
+                        '<span style="color:#6B7280;font-size:13px;">(download, valid 3 days)</span></p>'
                     )
                 else:
                     parts.append(
-                        f'<p><img src="{url}" alt="{name}" style="max-width:100%;border-radius:6px">'
-                        f'<br><a href="{url}">{name}</a> (link valid 3 days)</p>'
+                        f'<p style="margin:0 0 8px 0;"><img src="{url}" alt="{name}" '
+                        'style="max-width:100%;border-radius:8px;display:block;margin-bottom:6px;">'
+                        f'<a href="{url}" style="color:#2563EB;font-size:13px;">{name}</a> '
+                        '<span style="color:#6B7280;font-size:13px;">(link valid 3 days)</span></p>'
                     )
             except Exception:
                 parts.append(
-                    f'<p><a href="{url}">{name}</a> (photo, link valid 3 days)</p>'
+                    f'<p style="margin:0 0 8px 0;"><a href="{url}" style="color:#2563EB;font-size:13px;">{name}</a> '
+                    '<span style="color:#6B7280;font-size:13px;">(photo, link valid 3 days)</span></p>'
                 )
         else:
             parts.append(
-                f'<p>&#x1F3A5; <a href="{url}">{name}</a>'
-                f' &mdash; video, link valid for 3 days</p>'
+                f'<p style="margin:0 0 8px 0;">&#x1F3A5; <a href="{url}" style="color:#2563EB;font-size:13px;">{name}</a>'
+                ' <span style="color:#6B7280;font-size:13px;">&mdash; video, link valid for 3 days</span></p>'
             )
 
     parts.append("</div>")

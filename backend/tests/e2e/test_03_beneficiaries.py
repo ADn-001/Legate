@@ -32,7 +32,25 @@ async def test_create_beneficiary_returns_201(auth_client: AsyncClient):
     body = res.json()
     assert body["full_name"] == VALID_BENEFICIARY["full_name"]
     assert "id" in body
-    assert body["status"] == "pending"
+    # No invite-acceptance flow exists: beneficiaries are active immediately.
+    assert body["status"] == "active"
+    # Default create notifies ⇒ invited_at is set.
+    assert body["invited_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_create_beneficiary_silent_skips_notification(auth_client: AsyncClient):
+    """Silent add: notify_beneficiary=false ⇒ invited_at stays NULL and no
+    nomination email is sent (frontend renders the 'Added silently' badge)."""
+    res = await auth_client.post("/beneficiaries/", json={
+        **VALID_BENEFICIARY,
+        "email": f"silent_{uuid.uuid4().hex[:6]}@testlegate.dev",
+        "notify_beneficiary": False,
+    })
+    assert res.status_code == 201
+    body = res.json()
+    assert body["status"] == "active"
+    assert body["invited_at"] is None
 
 
 @pytest.mark.asyncio

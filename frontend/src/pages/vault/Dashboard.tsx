@@ -19,7 +19,12 @@ function deriveVaultStatus(schedule: CheckinSchedule | undefined) {
   const dispatched = schedule.last_dispatched_at ? new Date(schedule.last_dispatched_at).getTime() : null
   const confirmed = schedule.last_confirmed_at ? new Date(schedule.last_confirmed_at).getTime() : null
   if (dispatched !== null && (confirmed === null || confirmed < dispatched)) {
-    const graceEnd = dispatched + schedule.grace_period_days * 86400000
+    // Phase B: a demo-mode minute override takes precedence over the day
+    // column, mirroring the backend's grace_delta() precedence rule.
+    const graceMs = schedule.grace_period_minutes
+      ? schedule.grace_period_minutes * 60000
+      : schedule.grace_period_days * 86400000
+    const graceEnd = dispatched + graceMs
     if (Date.now() > graceEnd) return { color: 'bg-red-500', label: 'VAULT STATUS: OVERDUE' }
     return { color: 'bg-amber-400', label: 'VAULT STATUS: CHECK-IN PENDING' }
   }

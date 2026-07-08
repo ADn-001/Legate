@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
 
 from app.core.audit import write_audit
+from app.core.scheduling import interval_delta
 from app.db.models.checkin import CheckInEvent, CheckInSchedule, EventStatus, TokenType, ReleaseTrigger, TriggerStatus
 
 
@@ -47,7 +48,7 @@ class CheckInService:
         schedule = result.scalar_one_or_none()
         if schedule:
             schedule.last_confirmed_at = now
-            schedule.next_dispatch_at = now + timedelta(days=schedule.interval_days)
+            schedule.next_dispatch_at = now + interval_delta(schedule)
             schedule.snooze_count = 0
             # B4: a confirm fully resets emergency-pause and grace-reminder
             # state — otherwise a paused schedule is never dispatched again

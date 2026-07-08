@@ -9,6 +9,7 @@ services:
     depends_on:
       api:
         condition: service_healthy
+        restart: true   # nginx caches api's container IP at startup; restart it when api is recreated (stale-IP 502 fix)
     restart: unless-stopped
 
   api:
@@ -41,6 +42,8 @@ services:
       - STORAGE_QUOTA_BYTES=${STORAGE_QUOTA_BYTES:-1073741824}
       - ALERT_EMAIL=${ALERT_EMAIL:-}
       - FRONTEND_URL=${FRONTEND_URL:-http://localhost}
+      - DEMO_MODE=${DEMO_MODE:-false}
+      - BEAT_INTERVAL_SECONDS=${BEAT_INTERVAL_SECONDS:-3600}
     dns:
       - 8.8.8.8
       - 8.8.4.4
@@ -81,6 +84,11 @@ services:
       - SUPABASE_STORAGE_BUCKET_THUMBNAILS=${SUPABASE_STORAGE_BUCKET_THUMBNAILS:-thumbnails}
       - STORAGE_QUOTA_BYTES=${STORAGE_QUOTA_BYTES:-1073741824}
       - ALERT_EMAIL=${ALERT_EMAIL:-}
+      - DEMO_MODE=${DEMO_MODE:-false}
+      - BEAT_INTERVAL_SECONDS=${BEAT_INTERVAL_SECONDS:-3600}
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
     depends_on:
       redis:
         condition: service_healthy
@@ -111,6 +119,11 @@ services:
       - SUPABASE_STORAGE_BUCKET_THUMBNAILS=${SUPABASE_STORAGE_BUCKET_THUMBNAILS:-thumbnails}
       - STORAGE_QUOTA_BYTES=${STORAGE_QUOTA_BYTES:-1073741824}
       - ALERT_EMAIL=${ALERT_EMAIL:-}
+      - DEMO_MODE=${DEMO_MODE:-false}
+      - BEAT_INTERVAL_SECONDS=${BEAT_INTERVAL_SECONDS:-3600}
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
     depends_on:
       redis:
         condition: service_healthy

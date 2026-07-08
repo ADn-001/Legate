@@ -16,10 +16,14 @@ interface BeneficiaryFormProps {
 }
 
 export default function BeneficiaryForm({ initialData, onSubmit, onCancel, loading = false, otherEmergencyContactName }: BeneficiaryFormProps) {
+  // initialData present ⇒ editing an existing beneficiary; the notify
+  // choice only applies when first adding someone.
+  const isEdit = !!initialData
   const [fullName, setFullName] = useState(initialData?.full_name || '')
   const [email, setEmail] = useState(initialData?.email || '')
   const [relationship, setRelationship] = useState(initialData?.relationship || '')
   const [isEmergencyContact, setIsEmergencyContact] = useState(initialData?.is_emergency_contact || false)
+  const [notifyBeneficiary, setNotifyBeneficiary] = useState(true)
   const [errors, setErrors] = useState<Record<string, string>>({})
 
   const validate = () => {
@@ -39,6 +43,7 @@ export default function BeneficiaryForm({ initialData, onSubmit, onCancel, loadi
       email: email.trim(),
       relationship: relationship.trim() || undefined,
       is_emergency_contact: isEmergencyContact,
+      ...(isEdit ? {} : { notify_beneficiary: notifyBeneficiary }),
     })
   }
 
@@ -82,6 +87,22 @@ export default function BeneficiaryForm({ initialData, onSubmit, onCancel, loadi
           </p>
         )}
       </div>
+      {!isEdit && (
+        <div className="py-2">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="font-medium text-[#0D1117] text-sm">Notify by Email</p>
+              <p className="text-xs text-[#6B7280]">Send them an email letting them know they've been added</p>
+            </div>
+            <Toggle checked={notifyBeneficiary} onChange={setNotifyBeneficiary} />
+          </div>
+          {!notifyBeneficiary && (
+            <p className="text-xs text-[#6B7280] mt-2">
+              They won't be contacted until a delivery occurs. You can see silently added beneficiaries marked on their card.
+            </p>
+          )}
+        </div>
+      )}
       <div className="flex gap-3 pt-2">
         <Button type="button" variant="secondary" fullWidth onClick={onCancel} disabled={loading}>
           Cancel

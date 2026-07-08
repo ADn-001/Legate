@@ -8,7 +8,7 @@ import { useAuthStore } from '../../store/auth'
 import { useCryptoStore } from '../../store/crypto'
 import { usersApi } from '../../api/users'
 import { authApi } from '../../api/auth'
-import { settingsApi } from '../../api/settings'
+import { settingsApi, CheckinScheduleUpdate } from '../../api/settings'
 import { keysModule, toBase64, fromBase64 } from '../../crypto/keys'
 import { bip39Module, deriveRecoveryKey, hashMnemonic } from '../../crypto/bip39'
 import Button from '../../components/ui/Button'
@@ -29,8 +29,11 @@ const formatBytes = (bytes: number): string => {
   return `${(bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1)} ${units[i]}`
 }
 
-const MIN_CUSTOM_INTERVAL = 7
+// B4/FR-11: floor lowered from 7 to 1 day (permanent, all environments).
+const MIN_CUSTOM_INTERVAL = 1
 const MAX_CUSTOM_INTERVAL = 365
+const MIN_DEMO_MINUTES = 1
+const MAX_DEMO_MINUTES = 1440
 
 function downloadRecoveryPdf(words: string[]) {
   import('jspdf').then(({ jsPDF }) => {
@@ -116,17 +119,39 @@ export default function Security() {
   const [editIntervalCustom, setEditIntervalCustom] = useState(false)
   const [checkinSaving, setCheckinSaving] = useState(false)
   const [checkinMsg, setCheckinMsg] = useState<string | null>(null)
+  // Phase B: demo-mode minute inputs (only rendered when the server reports
+  // demo_mode: true — see the "Demo scheduling" section below).
+  const [demoIntervalMinutes, setDemoIntervalMinutes] = useState(2)
+  const [demoGraceMinutes, setDemoGraceMinutes] = useState(2)
+  // FR-23 emergency-contact confirmation window override — only relevant if
+  // an emergency contact is configured, but always sent alongside the other
+  // two demo fields so one "Apply Demo Schedule" click arms the whole cycle.
+  const [demoEmergencyMinutes, setDemoEmergencyMinutes] = useState(2)
 
   const updateCheckin = useMutation({
-    mutationFn: (d: { interval_days: number; grace_period_days: number }) =>
-      settingsApi.updateCheckinSchedule(d),
-    onSuccess: () => {
+    mutationFn: (d: CheckinScheduleUpdate) => settingsApi.updateCheckinSchedule(d),
+    onSuccess: (_res, variables) => {
       queryClient.invalidateQueries({ queryKey: ['checkin-schedule'] })
-      setEditingCheckin(false)
-      setCheckinMsg('Check-in schedule updated.')
+      // Only close the day-based edit panel for a day-based save — demo
+      // schedule/reset actions happen inline without leaving edit mode.
+      if (variables.interval_days !== undefined || variables.grace_period_days !== undefined) {
+        setEditingCheckin(false)
+      }
+      setCheckinMsg(
+        variables.clear_minute_overrides
+          ? 'Reset to day-based scheduling.'
+          : variables.check_interval_minutes !== undefined
+          ? 'Demo schedule applied.'
+          : 'Check-in schedule updated.'
+      )
       setTimeout(() => setCheckinMsg(null), 3000)
     },
-    onError: () => setCheckinMsg('Failed to update. Try again.'),
+    onError: (_err, variables) =>
+      setCheckinMsg(
+        variables.check_interval_minutes !== undefined || variables.clear_minute_overrides
+          ? 'Demo mode is disabled on the server, or the request failed.'
+          : 'Failed to update. Try again.'
+      ),
   })
   const storagePercent = storageUsage && storageUsage.limit_bytes > 0
     ? Math.min(100, (storageUsage.total_bytes / storageUsage.limit_bytes) * 100)
@@ -389,6 +414,9 @@ export default function Security() {
                   setEditInterval(checkinSchedule?.interval_days ?? 30)
                   setEditGrace(checkinSchedule?.grace_period_days ?? 7)
                   setEditIntervalCustom(false)
+                  setDemoIntervalMinutes(checkinSchedule?.check_interval_minutes ?? 2)
+                  setDemoGraceMinutes(checkinSchedule?.grace_period_minutes ?? 2)
+                  setDemoEmergencyMinutes(checkinSchedule?.emergency_confirm_minutes ?? 2)
                   setEditingCheckin(true)
                 }}
                 className="text-sm text-[#3D4F6B] hover:underline font-medium"
@@ -400,12 +428,36 @@ export default function Security() {
 
           {!editingCheckin ? (
             <div className="space-y-2">
-              <p className="text-sm text-[#6B7280]">
-                Check-in interval: <strong className="text-[#0D1117]">{checkinSchedule?.interval_days ?? '—'} days</strong>
-              </p>
-              <p className="text-sm text-[#6B7280]">
-                Grace period: <strong className="text-[#0D1117]">{checkinSchedule?.grace_period_days ?? '—'} days</strong>
-              </p>
+              {checkinSchedule?.check_interval_minutes ? (
+                <p className="text-sm text-[#6B7280]">
+                  Check-in interval: <strong className="text-[#0D1117]">{checkinSchedule.check_interval_minutes} minutes</strong>{' '}
+                  <span className="text-xs font-semibold text-amber-600">(demo)</span>
+                </p>
+              ) : (
+                <p className="text-sm text-[#6B7280]">
+                  Check-in interval: <strong className="text-[#0D1117]">{checkinSchedule?.interval_days ?? '—'} days</strong>
+                </p>
+              )}
+              {checkinSchedule?.grace_period_minutes ? (
+                <p className="text-sm text-[#6B7280]">
+                  Grace period: <strong className="text-[#0D1117]">{checkinSchedule.grace_period_minutes} minutes</strong>{' '}
+                  <span className="text-xs font-semibold text-amber-600">(demo)</span>
+                </p>
+              ) : (
+                <p className="text-sm text-[#6B7280]">
+                  Grace period: <strong className="text-[#0D1117]">{checkinSchedule?.grace_period_days ?? '—'} days</strong>
+                </p>
+              )}
+              {checkinSchedule?.emergency_confirm_minutes ? (
+                <p className="text-sm text-[#6B7280]">
+                  Emergency confirm window: <strong className="text-[#0D1117]">{checkinSchedule.emergency_confirm_minutes} minutes</strong>{' '}
+                  <span className="text-xs font-semibold text-amber-600">(demo)</span>
+                </p>
+              ) : (
+                <p className="text-sm text-[#6B7280]">
+                  Emergency confirm window: <strong className="text-[#0D1117]">48 hours</strong>
+                </p>
+              )}
               {checkinMsg && <p className="text-sm text-green-600">{checkinMsg}</p>}
             </div>
           ) : (
@@ -467,6 +519,90 @@ export default function Security() {
                   ))}
                 </div>
               </div>
+              {/* Phase B: demo scheduling — only rendered when the server has
+                  DEMO_MODE enabled (server still enforces this with a 403
+                  regardless of whether this section is visible). */}
+              {checkinSchedule?.demo_mode && (
+                <div className="border-2 border-amber-400 bg-amber-50 rounded-xl p-4 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <span className="px-2 py-0.5 bg-amber-400 text-white text-[10px] font-bold rounded uppercase tracking-wide">
+                      Demo
+                    </span>
+                    <p className="text-sm font-semibold text-amber-800">Demo scheduling (minutes)</p>
+                  </div>
+                  <p className="text-xs text-amber-700">
+                    Overrides the day-based schedule above with minute-level timing so a live demo can
+                    run the full check-in lifecycle in minutes instead of weeks.
+                  </p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs text-amber-800 mb-1">Interval (minutes)</label>
+                      <input
+                        type="number"
+                        min={MIN_DEMO_MINUTES}
+                        max={MAX_DEMO_MINUTES}
+                        value={demoIntervalMinutes}
+                        onChange={e => setDemoIntervalMinutes(Math.max(MIN_DEMO_MINUTES, Math.min(MAX_DEMO_MINUTES, Number(e.target.value))))}
+                        className="input-field w-full"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-amber-800 mb-1">Grace (minutes)</label>
+                      <input
+                        type="number"
+                        min={MIN_DEMO_MINUTES}
+                        max={MAX_DEMO_MINUTES}
+                        value={demoGraceMinutes}
+                        onChange={e => setDemoGraceMinutes(Math.max(MIN_DEMO_MINUTES, Math.min(MAX_DEMO_MINUTES, Number(e.target.value))))}
+                        className="input-field w-full"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-amber-800 mb-1">
+                      Emergency confirm window (minutes)
+                    </label>
+                    <input
+                      type="number"
+                      min={MIN_DEMO_MINUTES}
+                      max={MAX_DEMO_MINUTES}
+                      value={demoEmergencyMinutes}
+                      onChange={e => setDemoEmergencyMinutes(Math.max(MIN_DEMO_MINUTES, Math.min(MAX_DEMO_MINUTES, Number(e.target.value))))}
+                      className="input-field w-full"
+                    />
+                    <p className="text-[11px] text-amber-700 mt-1">
+                      Only matters if you have an emergency contact set (normally 48 hours) — replaces
+                      that real-time wait with minutes so the pending-confirmation branch can be
+                      demoed too.
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="secondary"
+                      disabled={
+                        !checkinSchedule?.check_interval_minutes &&
+                        !checkinSchedule?.grace_period_minutes &&
+                        !checkinSchedule?.emergency_confirm_minutes
+                      }
+                      onClick={() => updateCheckin.mutate({ clear_minute_overrides: true })}
+                    >
+                      Reset to Days
+                    </Button>
+                    <Button
+                      onClick={() =>
+                        updateCheckin.mutate({
+                          check_interval_minutes: demoIntervalMinutes,
+                          grace_period_minutes: demoGraceMinutes,
+                          emergency_confirm_minutes: demoEmergencyMinutes,
+                        })
+                      }
+                    >
+                      Apply Demo Schedule
+                    </Button>
+                  </div>
+                </div>
+              )}
+
               {checkinMsg && <p className="text-sm text-red-600">{checkinMsg}</p>}
               <div className="flex gap-2">
                 <Button variant="secondary" onClick={() => { setEditingCheckin(false); setCheckinMsg(null) }}>

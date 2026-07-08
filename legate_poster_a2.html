@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Legate — A2 Promotion Poster</title>
+<style>
+  @page { size: 420mm 594mm; margin: 0; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: #d7dbe4; }
+  body { font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif; }
+
+  .poster {
+    width: 420mm;
+    height: 594mm;
+    margin: 8mm auto;
+    background: #eef0f5;
+    position: relative;
+    overflow: hidden;
+    box-shadow: 0 0 4mm rgba(0,0,0,0.25);
+  }
+
+  .pad { padding: 16mm 18mm 0 18mm; }
+
+  /* ---------- Header ---------- */
+  .header { display: flex; align-items: center; justify-content: space-between; }
+  .brand { display: flex; align-items: center; gap: 4mm; }
+  .brand svg { width: 12mm; height: 12mm; }
+  .brand span { font-size: 11mm; font-weight: 800; color: #2c3547; letter-spacing: -0.3mm; }
+  .tagline-chip {
+    font-size: 3.6mm; font-weight: 600; color: #4a5568;
+    background: #ffffff; border: 0.3mm solid #dfe3ea; border-radius: 20mm;
+    padding: 2.4mm 6mm;
+  }
+
+  /* ---------- Hero ---------- */
+  .hero { display: flex; gap: 12mm; margin-top: 10mm; align-items: flex-start; }
+  .hero-copy { flex: 1.15; }
+  .hero-copy h1 {
+    font-size: 16.5mm; line-height: 1.05; font-weight: 800; color: #1e2530;
+    margin: 0 0 6mm 0; letter-spacing: -0.3mm;
+  }
+  .hero-copy h1 .accent { color: #47597a; }
+  .hero-copy p.pitch {
+    font-size: 5mm; line-height: 1.5; color: #4a5568; font-weight: 400;
+    margin: 0 0 7mm 0; max-width: 150mm;
+  }
+  .cta-row { display: flex; align-items: center; gap: 5mm; }
+  .cta-btn {
+    background: #3d4a63; color: #fff; font-weight: 700; font-size: 4.6mm;
+    padding: 4.5mm 9mm; border-radius: 3mm; display: inline-block;
+  }
+  .cta-sub { font-size: 3.6mm; color: #6b7280; font-weight: 600; }
+
+  .hero-mock { flex: 1; display: flex; justify-content: center; }
+
+  /* ---------- Phone mockup ---------- */
+  .phone {
+    width: 62mm; background: #fff; border-radius: 6mm; border: 0.4mm solid #d8dce4;
+    box-shadow: 0 3mm 6mm rgba(30,40,60,0.18);
+    overflow: hidden; flex-shrink: 0;
+  }
+  .phone .pnav {
+    display:flex; align-items:center; justify-content: space-between;
+    padding: 3mm 4mm; border-bottom: 0.3mm solid #eef0f5;
+  }
+  .phone .pnav .pbrand { display:flex; align-items:center; gap:1.6mm; font-weight:800; font-size: 3.6mm; color:#2c3547;}
+  .phone .pnav .pbrand svg{ width:4.2mm; height:4.2mm; }
+  .phone .pnav .avatar { width:5mm; height:5mm; border-radius:50%; background:#3d4a63; }
+  .phone .pbody { padding: 4mm; background:#eef0f5; min-height: 82mm; }
+  .phone .greet-h { font-size: 6mm; font-weight: 800; color:#1e2530; margin: 0 0 1mm 0;}
+  .phone .greet-s { font-size: 3mm; color:#6b7280; margin: 0 0 3.5mm 0;}
+  .phone .card { background:#fff; border-radius: 3mm; padding: 3.5mm; margin-bottom: 3mm; box-shadow: 0 1mm 2mm rgba(30,40,60,0.06); }
+  .phone .status-row { display:flex; align-items:center; gap:1.3mm; font-size: 2.7mm; font-weight:700; color:#1e2530; }
+  .phone .dot { width:1.8mm; height:1.8mm; border-radius:50%; background:#22c55e; }
+  .phone .muted { font-size: 2.5mm; color:#8a93a3; margin-top:1mm; }
+  .phone .split { display:flex; gap:2.5mm; margin-top: 2.5mm; }
+  .phone .split div { flex:1; background:#f3f4f7; border-radius:2mm; padding:2mm; }
+  .phone .split .lab { font-size:2.1mm; color:#8a93a3; font-weight:700; letter-spacing:0.2mm; }
+  .phone .split .val { font-size:3mm; font-weight:800; color:#1e2530; margin-top:0.5mm; }
+  .phone .cta-full { background:#3d4a63; color:#fff; text-align:center; font-weight:700; font-size:3mm; border-radius:2.5mm; padding:3mm; margin: 3mm 0; }
+  .phone .grid2 { display:flex; gap:2.5mm; }
+  .phone .grid2 .cell { flex:1; background:#fff; border-radius:2.5mm; padding:2.8mm; box-shadow: 0 1mm 2mm rgba(30,40,60,0.06); }
+  .phone .cell .t { font-size:2.9mm; font-weight:700; color:#1e2530; }
+  .phone .cell .s { font-size:2.2mm; color:#8a93a3; margin-top:0.8mm; }
+  .phone .field-lab { font-size: 2.4mm; font-weight:700; color:#374151; margin: 2.5mm 0 1mm 0; letter-spacing:0.2mm;}
+  .phone .field { background:#fff; border:0.3mm solid #dde1e8; border-radius:2mm; padding:2.4mm; font-size:2.6mm; color:#9aa1ad; }
+  .phone .toolbar { display:flex; gap:2mm; background:#fff; border:0.3mm solid #dde1e8; border-radius: 2mm 2mm 0 0; padding:2mm; font-size:3mm; color:#4a5568; }
+  .phone .msgbox { background:#fff; border:0.3mm solid #dde1e8; border-top:none; border-radius:0 0 2mm 2mm; height:16mm; }
+  .phone .steps { display:flex; gap:1.3mm; margin-bottom:3mm; }
+  .phone .steps div { flex:1; height:1.3mm; border-radius:1mm; background:#dde1e8; }
+  .phone .steps div.on { background:#3d4a63; }
+  .phone .stepline { font-size:2.2mm; color:#8a93a3; font-weight:700; margin-bottom:2mm; }
+  .phone .qtitle { font-size:4.6mm; font-weight:800; color:#1e2530; margin: 0 0 1.5mm 0; line-height:1.2;}
+  .phone .qsub { font-size:2.6mm; color:#6b7280; margin-bottom: 3mm; line-height:1.4;}
+  .phone .pillrow { display:flex; gap:1.8mm; margin-bottom:2.5mm; flex-wrap:wrap; }
+  .phone .pill { flex:1; min-width: 12mm; text-align:center; font-size:2.6mm; font-weight:700; color:#374151; background:#fff; border:0.3mm solid #dde1e8; border-radius:2mm; padding:2.2mm 0; }
+  .phone .pill.on { background:#3d4a63; color:#fff; border-color:#3d4a63; }
+  .phone .note { background:#dce7fb; border-radius:2mm; padding:2.5mm; font-size:2.3mm; color:#374151; line-height:1.4; margin-bottom:2.5mm; }
+  .phone .item-row { display:flex; align-items:center; justify-content:space-between; }
+  .phone .badge-active { background:#dcfce7; color:#166534; font-size:2.3mm; font-weight:700; border-radius:20mm; padding:1mm 2.6mm; display:inline-block; margin-top:1.5mm;}
+  .phone .icon-row svg{ width:3.6mm; height:3.6mm; }
+
+  .phone-cap { text-align:center; font-size:3.6mm; font-weight:700; color:#3d4a63; margin-top: 3mm; }
+
+  /* ---------- Feature section ---------- */
+  .section-title { font-size: 8mm; font-weight: 800; color: #1e2530; margin: 13mm 0 6mm 0; }
+  .feature-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6mm; }
+  .feature {
+    background: #fff; border-radius: 4mm; padding: 6mm; box-shadow: 0 1.5mm 3mm rgba(30,40,60,0.07);
+    display:flex; flex-direction:column; gap:2.5mm;
+  }
+  .feature .icon-box {
+    width: 11mm; height: 11mm; border-radius: 3mm; background: #3d4a63;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .feature .icon-box svg { width: 6mm; height: 6mm; stroke: #fff; }
+  .feature h3 { font-size: 5mm; font-weight: 800; color:#1e2530; margin:0; }
+  .feature p { font-size: 3.6mm; line-height:1.5; color:#5b6472; margin:0; }
+
+  /* ---------- Showcase row ---------- */
+  .showcase-title { font-size: 8mm; font-weight:800; color:#1e2530; margin: 13mm 0 6mm 0; }
+  .showcase-row { display:flex; gap: 8mm; justify-content:center; }
+
+  /* ---------- Footer CTA ---------- */
+  .footer-band {
+    position:absolute; left:0; right:0; bottom:0; height: 78mm;
+    background: #2c3547; padding: 10mm 18mm; color:#fff;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; gap:4mm;
+  }
+  .footer-band h2 { font-size: 11mm; font-weight:800; margin:0; }
+  .footer-band p { font-size: 4.4mm; color:#c7ccd6; margin:0; max-width:180mm; line-height:1.5; }
+  .foot-badges { display:flex; gap:6mm; margin-top:2mm; }
+  .foot-badge { display:flex; align-items:center; gap:2mm; font-size:3.8mm; font-weight:700; color:#dfe3ea; }
+  .foot-badge svg { width:5mm; height:5mm; stroke:#8fd3a5; }
+  .foot-url { font-size: 5mm; font-weight:800; color:#fff; margin-top:3mm; letter-spacing:0.3mm; }
+</style>
+</head>
+<body>
+<div class="poster">
+  <div class="pad">
+
+    <!-- Header -->
+    <div class="header">
+      <div class="brand">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#2c3547" stroke-width="2"><path d="M12 2 L20 5 V11 C20 16.5 16.5 20.7 12 22 C7.5 20.7 4 16.5 4 11 V5 Z"/></svg>
+        <span>Legate</span>
+      </div>
+      <div class="tagline-chip">Your Digital Legacy, Secured</div>
+    </div>
+
+    <!-- Hero -->
+    <div class="hero">
+      <div class="hero-copy">
+        <h1>The messages that<br>matter most,<br><span class="accent">delivered when<br>it counts.</span></h1>
+        <p class="pitch">Legate is an end-to-end encrypted vault for the letters, photos, and instructions you want your loved ones to have — but only when they truly need them. Set a simple check-in schedule; if you ever go quiet, Legate delivers your capsules automatically. No lawyers, no waiting, no lost passwords.</p>
+        <div class="cta-row">
+          <div class="cta-btn">+ Create Your First Capsule</div>
+          <div class="cta-sub">Free to start · 2 minute setup</div>
+        </div>
+      </div>
+      <div class="hero-mock">
+        <div class="phone">
+          <div class="pnav">
+            <div class="pbrand">
+              <svg viewBox="0 0 24 24" fill="none" stroke="#2c3547" stroke-width="2.5"><path d="M12 2 L20 5 V11 C20 16.5 16.5 20.7 12 22 C7.5 20.7 4 16.5 4 11 V5 Z"/></svg>
+              Legate
+            </div>
+            <div class="avatar"></div>
+          </div>
+          <div class="pbody">
+            <p class="greet-h">Hello, Adnan</p>
+            <p class="greet-s">Your digital legacy is secured and up to date.</p>
+            <div class="card">
+              <div class="status-row"><span class="dot"></span> VAULT STATUS: ACTIVE</div>
+              <p class="muted">Your vault is active and protected</p>
+              <div class="split">
+                <div><div class="lab">LAST CHECK-IN</div><div class="val">Never</div></div>
+                <div><div class="lab">NEXT CHECK-IN</div><div class="val">Jul 11</div></div>
+              </div>
+            </div>
+            <div class="cta-full">+ Create Capsule</div>
+            <div class="grid2">
+              <div class="cell"><div class="t">My Capsules</div><div class="s">1 secured vault</div></div>
+              <div class="cell"><div class="t">Beneficiaries</div><div class="s">1 person managed</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Features -->
+    <div class="section-title">What Legate Does For You</div>
+    <div class="feature-grid">
+      <div class="feature">
+        <div class="icon-box"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg></div>
+        <h3>Encrypted Capsules</h3>
+        <p>Write rich messages and attach photos or video. Each capsule is sealed with independent, end-to-end encryption before it ever leaves your device.</p>
+      </div>
+      <div class="feature">
+        <div class="icon-box"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg></div>
+        <h3>Automatic Check-Ins</h3>
+        <p>Choose how often we check on you — every 7, 14, 30, 60 days, or a custom interval. Miss it, and delivery begins on its own.</p>
+      </div>
+      <div class="feature">
+        <div class="icon-box"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 00-4-4H7a4 4 0 00-4 4v2"/><circle cx="10" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg></div>
+        <h3>Trusted Beneficiaries</h3>
+        <p>Assign the people who should receive your legacy. They get your instructions, never your account access or settings.</p>
+      </div>
+      <div class="feature">
+        <div class="icon-box"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div>
+        <h3>Grace Period Safety Net</h3>
+        <p>A configurable buffer of 3 to 30 days sits between a missed check-in and delivery — protection against false alarms, never against inaction.</p>
+      </div>
+      <div class="feature">
+        <div class="icon-box"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></div>
+        <h3>Full Activity Log</h3>
+        <p>Every check-in, edit, and delivery is recorded. Review your vault's history any time from the Activity tab.</p>
+      </div>
+      <div class="feature">
+        <div class="icon-box"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="8" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/><rect x="13" y="13" width="8" height="8" rx="1.5"/></svg></div>
+        <h3>Independent Encryption</h3>
+        <p>Create unlimited capsules for different people. Each is encrypted on its own, so access is never all-or-nothing.</p>
+      </div>
+    </div>
+
+    <!-- Showcase -->
+    <div class="showcase-title">Inside the Vault</div>
+    <div class="showcase-row">
+
+      <div>
+        <div class="phone">
+          <div class="pnav">
+            <div class="pbrand"><svg viewBox="0 0 24 24" fill="none" stroke="#2c3547" stroke-width="2.5"><path d="M12 2 L20 5 V11 C20 16.5 16.5 20.7 12 22 C7.5 20.7 4 16.5 4 11 V5 Z"/></svg>Legate</div>
+            <div class="avatar"></div>
+          </div>
+          <div class="pbody">
+            <p class="qtitle" style="font-size:4mm;">Create Capsule</p>
+            <p class="qsub">Secure your digital legacy</p>
+            <div class="field-lab">CAPSULE TITLE</div>
+            <div class="field">e.g. Instructions for Sarah</div>
+            <div class="field-lab">MESSAGE</div>
+            <div class="toolbar"><b>B</b> <i>I</i> ≡</div>
+            <div class="msgbox"></div>
+            <div class="field-lab">MEDIA ATTACHMENTS</div>
+            <div class="field" style="text-align:center; padding:4mm;">⬆ Drag &amp; drop or <b>browse</b></div>
+          </div>
+        </div>
+        <div class="phone-cap">Compose a Capsule</div>
+      </div>
+
+      <div>
+        <div class="phone">
+          <div class="pnav">
+            <div class="pbrand"><svg viewBox="0 0 24 24" fill="none" stroke="#2c3547" stroke-width="2.5"><path d="M12 2 L20 5 V11 C20 16.5 16.5 20.7 12 22 C7.5 20.7 4 16.5 4 11 V5 Z"/></svg>Legate</div>
+            <div class="avatar"></div>
+          </div>
+          <div class="pbody">
+            <p class="qtitle" style="font-size:4mm;">My Capsules</p>
+            <div class="cta-full" style="margin-top:0;">+ Create New Capsule</div>
+            <div class="card">
+              <div class="item-row">
+                <div class="status-row"><svg viewBox="0 0 24 24" fill="none" stroke="#1e2530" stroke-width="2.5" style="width:3.4mm;height:3.4mm;"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 018 0v3"/></svg> test</div>
+                <div class="icon-row" style="display:flex; gap:1.6mm;">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
+                </div>
+              </div>
+              <p class="muted">To: Alex</p>
+              <div class="badge-active">Active</div>
+            </div>
+            <div class="note">💡 Create multiple capsules and assign them to different beneficiaries. Each is encrypted independently.</div>
+          </div>
+        </div>
+        <div class="phone-cap">Manage Every Capsule</div>
+      </div>
+
+      <div>
+        <div class="phone">
+          <div class="pnav">
+            <div class="pbrand"><svg viewBox="0 0 24 24" fill="none" stroke="#2c3547" stroke-width="2.5"><path d="M12 2 L20 5 V11 C20 16.5 16.5 20.7 12 22 C7.5 20.7 4 16.5 4 11 V5 Z"/></svg>Legate</div>
+            <div class="avatar"></div>
+          </div>
+          <div class="pbody">
+            <div class="stepline">STEP 1 OF 4 · CHECK-IN</div>
+            <div class="steps"><div class="on"></div><div></div><div></div><div></div></div>
+            <p class="qtitle">How often should we check in?</p>
+            <p class="qsub">If we don't hear back within the grace period, your capsules will be delivered.</p>
+            <div class="field-lab">CHECK-IN INTERVAL</div>
+            <div class="pillrow">
+              <div class="pill">7d</div><div class="pill">14d</div><div class="pill on">30d</div>
+              <div class="pill">60d</div><div class="pill">Custom</div>
+            </div>
+            <div class="field-lab">GRACE PERIOD</div>
+            <div class="pillrow">
+              <div class="pill">3d</div><div class="pill on">7d</div><div class="pill">14d</div><div class="pill">30d</div>
+            </div>
+            <div class="note">If we don't hear from you within <b>37 days</b>, capsules deliver to your beneficiaries.</div>
+          </div>
+        </div>
+        <div class="phone-cap">Configure Check-Ins</div>
+      </div>
+
+      <div>
+        <div class="phone">
+          <div class="pnav">
+            <div class="pbrand"><svg viewBox="0 0 24 24" fill="none" stroke="#2c3547" stroke-width="2.5"><path d="M12 2 L20 5 V11 C20 16.5 16.5 20.7 12 22 C7.5 20.7 4 16.5 4 11 V5 Z"/></svg>Legate</div>
+            <div class="avatar"></div>
+          </div>
+          <div class="pbody">
+            <div class="stepline">STEP 2 OF 4 · BENEFICIARY</div>
+            <div class="steps"><div class="on"></div><div class="on"></div><div></div><div></div></div>
+            <p class="qtitle">Who should receive your legacy?</p>
+            <div class="note">🛡 They receive only instructions, not account access. Beneficiaries can't modify your settings.</div>
+            <div class="field-lab">FULL NAME</div>
+            <div class="field">Jane Smith</div>
+            <div class="field-lab">EMAIL ADDRESS</div>
+            <div class="field">jane@example.com</div>
+            <div class="field-lab">RELATIONSHIP (OPTIONAL)</div>
+            <div class="field">Sister, Best Friend</div>
+          </div>
+        </div>
+        <div class="phone-cap">Add Beneficiaries</div>
+      </div>
+
+    </div>
+
+  </div>
+
+  <!-- Footer -->
+  <div class="footer-band">
+    <h2>Don't leave it to chance.</h2>
+    <p>Every message you'd want to send "someday" — secured today, delivered the moment it truly matters. Set it up once in minutes.</p>
+    <div class="foot-badges">
+      <div class="foot-badge"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 L20 5 V11 C20 16.5 16.5 20.7 12 22 C7.5 20.7 4 16.5 4 11 V5 Z"/></svg> End-to-end encrypted</div>
+      <div class="foot-badge"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg> Automatic delivery</div>
+      <div class="foot-badge"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 00-4-4H7a4 4 0 00-4 4v2"/><circle cx="10" cy="7" r="4"/></svg> Unlimited beneficiaries</div>
+    </div>
+    <div class="foot-url">legate.app &nbsp;·&nbsp; Your digital legacy, secured.</div>
+  </div>
+</div>
+</body>
+</html>

@@ -25,6 +25,7 @@ class BeneficiaryService:
         relationship: str | None,
         is_emergency_contact: bool,
         nominator_name: str,
+        notify: bool = True,
     ) -> Beneficiary:
         # Enforce unique (user_id, email) among non-removed rows only (L5):
         # a removed beneficiary's email must be re-addable — removed rows are
@@ -41,23 +42,33 @@ class BeneficiaryService:
         if existing.scalar_one_or_none():
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Beneficiary with this email already exists")
 
+        # Status is `active` from day one — there is no invite-acceptance flow
+        # (the nomination email is purely informational). `invited_at` records
+        # whether/when that email was sent; NULL means a silent add.
         beneficiary = Beneficiary(
             user_id=user_id,
             full_name=full_name,
             email=email,
             relationship_type=relationship,
             is_emergency_contact=is_emergency_contact,
-            status=BeneficiaryStatus.pending,
-            invited_at=datetime.now(timezone.utc),
+            status=BeneficiaryStatus.active,
+            invited_at=datetime.now(timezone.utc) if notify else None,
         )
         self.db.add(beneficiary)
         await self.db.flush()
 
-        try:
-            send_nomination_email(to=email, nominator_name=nominator_name)
-        except Exception:
-            pass  # Email delivery failure must not block beneficiary creation
-        await write_audit(self.db, "beneficiary_added", user_id=user_id, resource_id=beneficiary.id)
+        if notify:
+            try:
+                send_nomination_email(to=email, nominator_name=nominator_name)
+            except Exception:
+                pass  # Email delivery failure must not block beneficiary creation
+        await write_audit(
+            self.db,
+            "beneficiary_added",
+            user_id=user_id,
+            resource_id=beneficiary.id,
+            meta={"silent": not notify},
+        )
         await self.db.commit()
         return beneficiary
 
@@ -103,9 +114,18 @@ class BeneficiaryService:
             if key in kwargs and kwargs[key] is not None:
                 setattr(beneficiary, attr, kwargs[key])
 
-        if "email" in kwargs and kwargs["email"] and kwargs["email"] != old_email:
+        # Re-send the nomination email on address change — but only for
+        # beneficiaries who were notified in the first place (invited_at set).
+        # Silently-added beneficiaries stay silent.
+        if (
+            "email" in kwargs
+            and kwargs["email"]
+            and kwargs["email"] != old_email
+            and beneficiary.invited_at is not None
+        ):
             try:
                 send_nomination_email(to=kwargs["email"], nominator_name=nominator_name)
+                beneficiary.invited_at = datetime.now(timezone.utc)
             except Exception:
                 pass
 

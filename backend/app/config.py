@@ -95,6 +95,16 @@ class Settings(BaseSettings):
     # Empty string disables alert emails (audit log row is always written).
     alert_email: str = ""
 
+    # Phase B: demo mode. When true, PATCH /settings/checkin accepts minute-
+    # level interval/grace overrides on CheckInSchedule so a live demo can
+    # run the full check-in -> missed -> grace -> release lifecycle in
+    # minutes. Server-side enforced (not just a UI flag) — see B4/api/settings.py.
+    demo_mode: bool = False
+    # Celery beat tick (seconds) for dispatch/grace/trigger-promotion tasks.
+    # Default 3600 (hourly) matches day-based math exactly. Lower only when
+    # DEMO_MODE is on so minute-level schedules actually fire promptly.
+    beat_interval_seconds: int = 3600
+
 
     @model_validator(mode="after")
     def _validate_secrets(self) -> "Settings":
