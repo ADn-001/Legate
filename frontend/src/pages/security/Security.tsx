@@ -2,7 +2,7 @@ import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import axios from 'axios'
-import { ArrowLeft, Shield, Lock, Phone, KeyRound, CheckCircle, HardDrive, RefreshCw, Copy, AlertTriangle, Clock, FileDown } from 'lucide-react'
+import { ArrowLeft, Shield, Lock, Phone, KeyRound, CheckCircle, HardDrive, RefreshCw, Copy, AlertTriangle, Clock, FileDown, LogOut } from 'lucide-react'
 import { useBeneficiaries, useUpdateBeneficiary } from '../../hooks/useBeneficiaries'
 import { useAuthStore } from '../../store/auth'
 import { useCryptoStore } from '../../store/crypto'
@@ -96,6 +96,8 @@ export default function Security() {
   const [passwordError, setPasswordError] = useState<string | null>(null)
   const [passwordSuccess, setPasswordSuccess] = useState(false)
 
+  const [logoutLoading, setLogoutLoading] = useState(false)
+
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState('')
   const [deletePassword, setDeletePassword] = useState('')
@@ -167,6 +169,29 @@ export default function Security() {
   const [regenLoading, setRegenLoading] = useState(false)
   const [regenError, setRegenError] = useState<string | null>(null)
   const regenCekRef = useRef<CryptoKey | null>(null)
+
+  // Ends the session: revokes the refresh token server-side (best-effort),
+  // then hard-reloads to /auth/login. Uses window.location (not react-router's
+  // navigate) so the app's top-level bootstrap effect re-runs from scratch —
+  // client-side routing after clearing auth state leaves `bootstrapped` stuck
+  // at false (it's only ever set on that one-time mount effect), which would
+  // strand the user on the full-screen loading spinner forever.
+  const handleLogout = async () => {
+    setLogoutLoading(true)
+    try {
+      const refreshToken = localStorage.getItem('refresh_token')
+      if (refreshToken) {
+        await authApi.logout({ refresh_token: refreshToken })
+      }
+    } catch {
+      // Best-effort server-side revoke — proceed to clear the local session
+      // regardless of whether this succeeded.
+    } finally {
+      useAuthStore.getState().clear()
+      useCryptoStore.getState().clearCek()
+      window.location.href = '/auth/login'
+    }
+  }
 
   const handleSetEmergencyContact = async () => {
     if (!selectedEmergencyId) return
@@ -339,7 +364,10 @@ export default function Security() {
       await usersApi.deleteAccount({ confirmation: 'DELETE', password: deletePassword })
       useAuthStore.getState().clear()
       useCryptoStore.getState().clearCek()
-      navigate('/')
+      // Hard-reload (not react-router's navigate) so the top-level bootstrap
+      // effect re-runs — see handleLogout above for why client-side routing
+      // after clear() leaves the app stuck on the loading spinner forever.
+      window.location.href = '/'
     } catch {
       setDeleteError('Incorrect password or deletion failed.')
     } finally {
@@ -375,6 +403,22 @@ export default function Security() {
               <div className="w-2 h-2 bg-green-600 rounded-full" />
               <span className="font-semibold text-green-800 text-sm">ACTIVE</span>
             </div>
+          </div>
+        </div>
+
+        {/* Session */}
+        <div className="bg-white rounded-2xl shadow-md p-6 mb-8">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <LogOut className="w-5 h-5 text-[#3D4F6B]" />
+              <div>
+                <h3 className="font-semibold text-[#0D1117]">Session</h3>
+                <p className="text-xs text-[#6B7280] mt-0.5">Sign out of this device.</p>
+              </div>
+            </div>
+            <Button variant="secondary" loading={logoutLoading} onClick={handleLogout}>
+              Log Out
+            </Button>
           </div>
         </div>
 

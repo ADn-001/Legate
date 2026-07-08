@@ -56,7 +56,7 @@ export default function HowItWorks() {
             <p className="text-[#6B7280] leading-relaxed">
               Legate periodically sends you a check-in email. You respond to confirm you're active.
               If you miss a check-in by more than the grace period you configured, Legate begins the
-              delivery process. You choose how often you want check-ins (anywhere from 7 to 365 days)
+              delivery process. You choose how often you want check-ins (anywhere from 1 to 365 days)
               and how long the grace period lasts.
             </p>
           </div>
@@ -71,7 +71,7 @@ export default function HowItWorks() {
             <p className="text-[#6B7280] leading-relaxed">
               When delivery is triggered, Legate decrypts each capsule using a separately wrapped
               delivery key (never your login password) and sends the contents to the beneficiary's
-              email. Media attachments are included as 30-day signed links. After delivery, your
+              email. Media attachments are included as 3-day signed links. After delivery, your
               account is memorialized and the underlying data is purged within 72 hours.
             </p>
           </div>
