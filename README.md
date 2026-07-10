@@ -41,15 +41,18 @@ All three must be **private**.
 | `media-attachments` | Photo and video uploads |
 | `thumbnails` | Auto-generated image thumbnails |
 
-### 2. Row Level Security (deferred)
+### 2. Row Level Security (not needed for this architecture)
 
 > **Note:** the backend accesses the database and storage exclusively with the
-> service-role key, so RLS policies are not required for the app to function.
-> Authoring and applying RLS policies (NFR-14, defense-in-depth) is a
-> **pre-public-launch TODO** — all authorization currently happens in the
-> FastAPI dependency layer only, with no database-level backstop. See
-> `implementation/Legate_PRD_v3_0.md` §2.3/§9 for the current, tracked status
-> of this and every other deferred item.
+> service-role key (or the `postgres` role for direct Postgres connections),
+> and the frontend has no direct path to Supabase at all — every request goes
+> through the FastAPI backend. RLS protects architectures where a client
+> connects to Supabase directly with a scoped JWT; that access pattern doesn't
+> exist here, so enabling RLS policies wouldn't add a real security boundary
+> on top of the existing FastAPI-layer authorization. This was reassessed
+> (not just carried over from an earlier plan) — see
+> `implementation/Legate_PRD_v3_0.md` §4.2/§11.3 for the full reasoning. Skip
+> this step; nothing else in setup depends on it.
 
 ### 3. Enable email OTP auth
 
@@ -112,7 +115,7 @@ Browser / PWA
 
 api (FastAPI + Uvicorn, 2 workers)
      │
-     ├── Supabase (auth, RLS, storage)
+     ├── Supabase (auth, storage)
      ├── PostgreSQL via SQLAlchemy + asyncpg
      └── Redis (task queue / rate-limit)
 
@@ -121,16 +124,18 @@ beat   (Celery beat)  ← enqueues periodic tasks
 redis  (Redis 7)      ← broker + result backend
 ```
 
-All four backend services (`api`, `worker`, `beat`, `redis`) share the same Docker image (`legate-backend:latest`) built from `backend/Dockerfile`. Only `redis` uses a separate image.
+`api`, `worker`, and `beat` share the same Docker image (`legate-backend:latest`) built from `backend/Dockerfile`, with different startup commands — no separate builds. `redis` runs the official `redis:7-alpine` image.
 
 ### Periodic tasks (beat schedule)
 
 | Task | Interval | Purpose |
 |---|---|---|
-| `dispatch_due_checkins` | 1 h | Send check-in emails to users whose `next_dispatch_at` is past |
-| `check_grace_periods` | 1 h | Create release triggers for users whose grace period has expired |
-| `process_pending_triggers` | 1 h | Promote pending-confirmation triggers once the 48 h window elapses |
-| `send_grace_period_reminders` | 12 h | Send day-3 and day-7 grace-period reminder emails |
+| `dispatch_due_checkins` | `BEAT_INTERVAL_SECONDS` (default 1 h) | Send check-in emails to users whose `next_dispatch_at` is past |
+| `check_grace_periods` | `BEAT_INTERVAL_SECONDS` (default 1 h) | Create release triggers for users whose grace period has expired |
+| `process_pending_triggers` | `BEAT_INTERVAL_SECONDS` (default 1 h) | Promote pending-confirmation triggers once the 48 h window elapses |
+| `send_grace_period_reminders` | Fixed 12 h (not affected by `BEAT_INTERVAL_SECONDS`) | Send day-3 and day-7 grace-period reminder emails |
+
+The first three all share the same configurable tick (`BEAT_INTERVAL_SECONDS`) — lowering it is what makes demo-mode minute-level schedules actually fire promptly.
 
 ### Migrations
 
@@ -177,6 +182,38 @@ VITE_API_BASE_URL=http://localhost:8000 npm run dev
 
 ---
 
+## Manual testing guide (legate.one)
+
+For reviewers testing the live deployment rather than running the stack locally. Full detail, including a complete feature-by-feature walkthrough and known limitations, is in `implementation/Legate_Testers_Guide.md` — this is the condensed version.
+
+**The live site currently runs with demo scheduling on** and will stay that way for the assessment period, so check-in intervals/grace periods/emergency-contact windows can be set in minutes instead of real days, letting you watch a full signup → check-in → missed check-in → delivery cycle complete in one sitting.
+
+### Read this before you sign up
+
+Legate creates your account record the moment you submit the signup form, **before** email verification. If you don't finish verification (expired code, closed the tab, etc.), that email is permanently stuck — there's no cleanup job, and any later signup with the same email fails with "Email already registered."
+
+- Stuck on the code screen with an expired/wrong code? Use **Resend** on that same screen — safe, doesn't create a new account.
+- Need a fresh account, or already navigated away? Use a **plus-alias** — most providers treat `you+anything@domain.com` as your real inbox, but Legate treats it as a distinct account:
+  - `jane.doe@gmail.com` → `jane.doe+test1@gmail.com`, `jane.doe+test2@gmail.com`, etc.
+  - You'll want at least two working addresses/aliases: one to test as yourself, one to add as a beneficiary so you can see what a recipient actually receives.
+
+### Core things to test
+
+1. **Signup + verification** — weak-password rejection, OTP entry, resend, and (expected, not a bug) the duplicate-email 409 above.
+2. **Onboarding wizard** — check-in interval/grace period, the amber "Demo scheduling (minutes)" panel + Apply Demo Schedule, adding a beneficiary (try both the Emergency Contact and Notify by Email toggles), creating a first capsule with a photo/video attachment and using Preview, and the 24-word recovery phrase (save it — there's no way to view the original again later).
+3. **Dashboard** — vault status pill, check-in dates, capsule/beneficiary counts.
+4. **Capsules** — create/edit/delete from `/vault/capsules`, media attachments, autosave draft indicator.
+5. **Beneficiaries** — add/edit/remove, emergency-contact reassignment warning, silently-added badge.
+6. **Full check-in lifecycle** — confirm via the emailed link (confirmation page should report the interval in **minutes** during demo mode), let a cycle lapse into grace, test the emergency-contact pause link, and confirm delivery actually lands in the beneficiary's inbox and the sender's account becomes memorialized/read-only afterward.
+7. **Security settings** — password change, recovery-phrase regenerate (replaces, doesn't reveal, the old one), forgot-password flow, logout, and delete account (immediate lockout, full erasure within 72 hours — not instant, by design).
+8. **Activity log** and **PWA install** (Android: **⋮ menu → Install app**, not the address bar).
+
+### Known limitations (documented, not bugs)
+
+No native mobile app (PWA only, by design), recovery phrase is regenerate-only, no database-level Row Level Security (all authorization is in the app layer — deliberate, since the browser never talks to the database directly), no independent pen-test or formal accessibility audit, no CI/CD (manual deploys), single-server hosting, Cloudflare-edge-IP rate-limit bucketing, no email-change or capsule-reorder UI, delivered media links expire after 3 days. Full rationale for each is in `implementation/Legate_Testers_Guide.md` and `implementation/Legate_PRD_v3_0.md`.
+
+---
+
 ## Testing
 
 ### Backend unit tests
@@ -191,7 +228,7 @@ docker compose exec api pytest tests/ -q --ignore=tests/e2e
 docker compose exec api pytest tests/e2e/ -q
 ```
 
-Runs suites 01–15 covering auth, beneficiaries, capsules, check-in lifecycle, media delivery, rate limiting, and security hardening. Requires real credentials in `.env`.
+Runs suites 01–16 covering health, auth, beneficiaries, capsules, check-in settings/tokens/lifecycle, activity, users, Celery tasks, security hardening, Supabase integration, media delivery, rate limiting, and demo mode. Requires real credentials in `.env`.
 
 ### Frontend unit tests
 
@@ -212,11 +249,14 @@ E2E_BASE_URL=http://localhost:8080 npm run test:e2e
 
 ### Run everything (CI / pre-ship)
 
-```bash
-bash scripts/run_all_tests.sh
-```
+There is no single CI script in this repo (no CI/CD pipeline exists — deploys are manual). Run the suites above in this order:
 
-Builds the stack from scratch, runs all suites in order, fails fast on the first error. See `scripts/run_all_tests.sh` for the full sequence.
+```bash
+docker compose up -d --build
+docker compose exec api pytest tests/ -q --ignore=tests/e2e
+docker compose exec api pytest tests/e2e/ -q
+cd frontend && npm run test && npm run test:e2e && cd ..
+```
 
 ### Lighthouse (NFR-25 — PWA ≥ 90)
 
@@ -253,9 +293,9 @@ Full rationale for each deviation is in `docs/SECURITY.md`.
 
 NFR-12 calls for a Redis blacklist to prevent token replay. Legate uses DB-backed single-use tokens instead: each token's `status` column is mutated to `used` in the same transaction as the action it authorises. This is race-safe (no TOCTOU window) and does not require Redis to be up for token invalidation to work. Tokens are 64-byte URL-safe random strings with a 7-day `expires_at`.
 
-### Recovery-phrase re-display = regenerate (FR-35)
+### Recovery-phrase re-display = regenerate, not reveal (FR-35)
 
-FR-35 asks for re-display of the existing recovery phrase. The recovery phrase is derived from the CEK, which is zero-knowledge (never stored server-side in plaintext). The backend cannot reconstruct it. Displaying it again requires the user to be authenticated and their CEK to be in browser memory. The implemented flow is: re-derive phrase from in-memory CEK → show phrase → user may download PDF. This is functionally equivalent; it does not produce a new phrase.
+FR-35 asks for re-display of the existing recovery phrase. That's not actually possible: the 24-word phrase itself is never stored anywhere, by design — only a one-way derived blob used to validate a submitted phrase, and a copy of the CEK wrapped under a key derived from the phrase. Neither of those can be reversed back into the original words. So "view my recovery phrase again" in Security settings is implemented as **regenerate**, not reveal: after confirming your password, it generates a brand-new 24-word phrase (`bip39Module.generatePhrase()`), re-wraps your existing CEK under it, and immediately invalidates the old phrase — the UI is explicit about this ("Your old recovery phrase stops working as soon as you confirm"). This is a deliberate, cryptographically-necessary deviation from a literal reading of FR-35, not a partial implementation of phrase re-display.
 
 ### Backend-rendered check-in pages (GET mutations)
 

@@ -188,7 +188,7 @@ export default function Landing() {
       {/* Footer */}
       <footer className="bg-white border-t border-gray-200 mt-24">
         <div className="max-w-7xl mx-auto px-4 py-12">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-8 mb-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
             <div>
               <div className="flex items-center gap-2 mb-4">
                 <Shield className="w-6 h-6 text-[#3D4F6B]" />
@@ -197,22 +197,6 @@ export default function Landing() {
               <p className="text-[#6B7280] text-sm">
                 Your digital legacy, secured.
               </p>
-            </div>
-            <div>
-              <h4 className="font-bold text-[#0D1117] mb-4">Product</h4>
-              <ul className="space-y-2 text-[#6B7280] text-sm">
-                <li><a href="#" className="hover:text-[#3D4F6B]">Features</a></li>
-                <li><a href="#" className="hover:text-[#3D4F6B]">Security</a></li>
-                <li><a href="#" className="hover:text-[#3D4F6B]">Pricing</a></li>
-              </ul>
-            </div>
-            <div>
-              <h4 className="font-bold text-[#0D1117] mb-4">Company</h4>
-              <ul className="space-y-2 text-[#6B7280] text-sm">
-                <li><a href="#" className="hover:text-[#3D4F6B]">About</a></li>
-                <li><a href="#" className="hover:text-[#3D4F6B]">Blog</a></li>
-                <li><a href="#" className="hover:text-[#3D4F6B]">Contact</a></li>
-              </ul>
             </div>
             <div>
               <h4 className="font-bold text-[#0D1117] mb-4">Legal</h4>

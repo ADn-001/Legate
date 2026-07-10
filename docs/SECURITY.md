@@ -36,10 +36,15 @@ Capsule plaintext  (stored ciphertext in Supabase Storage)
 **Delivery path (CEK unwrapping at delivery time):**
 
 The delivery worker holds a separate wrapping key derived as
-`HMAC-SHA256(DELIVERY_SECRET, user_id)`.  At signup the client:
+`HMAC-SHA256(DELIVERY_SECRET, user_id)`.  `POST /auth/signup` itself sends
+`delivery_encrypted_cek`/`delivery_cek_iv` as `null` — the delivery wrap is
+deferred until the account is actually usable. Once the user submits a
+correct OTP on the verify-email screen (`completeEncryptionSetup` in
+`VerifyEmail.tsx`), the client:
 1. Derives the delivery wrapping key by calling `POST /auth/me/delivery-wrapping-key`.
-2. Re-encrypts the CEK under the delivery wrapping key.
-3. Sends `delivery_encrypted_cek` + `delivery_cek_iv` to the server.
+2. Re-encrypts the (now-unwrapped) CEK under the delivery wrapping key.
+3. Sends `delivery_encrypted_cek` + `delivery_cek_iv` to the server via
+   `PATCH /auth/me/encryption-key`.
 
 The server stores the delivery-wrapped blob.  At delivery time, the worker re-derives
 the wrapping key from `DELIVERY_SECRET` and `user_id` (no network call to the browser
@@ -107,10 +112,14 @@ This is why S1 (strong `DELIVERY_SECRET`) is a prerequisite.
 **NFR-12** calls for a Redis blacklist to prevent JWT replay.  Legate uses a different
 but equivalent mechanism for check-in / snooze / pause tokens:
 
-- Tokens are 64-byte URL-safe random strings stored in the `checkin_tokens` table.
+- Tokens are 64-byte URL-safe random strings stored in the `checkin_events` table.
 - They are single-use: consuming a token mutates its `status` column to `used` in the
   same database transaction as the action it authorises.
-- Tokens expire after 7 days (enforced by an `expires_at` column checked on every use).
+- Tokens expire after 7 days for a normal check-in cycle (enforced by an
+  `expires_at` column checked on every use). Grace-period reminder tokens are
+  the exception: their `expires_at` is tied to the remaining grace-deadline
+  window instead of a flat 7 days, so a reminder link never outlives the grace
+  period it belongs to.
 - The token is never a JWT; it is an opaque bearer secret with no decodable payload.
 
 **Why this is equivalent to a blacklist:**

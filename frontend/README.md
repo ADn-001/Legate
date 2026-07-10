@@ -14,7 +14,10 @@ React + TypeScript + Vite + Tailwind CSS frontend for the Legate digital legacy 
 - **Axios** - HTTP client
 - **Web Crypto API** - Client-side encryption
 - **BIP-39** - Recovery phrase generation
-- **Capacitor** - iOS/Android shell (future)
+
+The app is a PWA (installable via the browser's "Add to Home Screen"). A native
+shell such as Capacitor was scoped out — the PWA already provides an app-like
+experience. `@capacitor/core` remains listed in `package.json` but is unused.
 
 ## Project Structure
 
@@ -27,7 +30,7 @@ src/
 │
 ├── api/                  # API endpoints (Axios)
 ├── crypto/               # Encryption/crypto logic
-├── store/                # Zustand stores (auth, crypto)
+├── store/                # Zustand stores (auth, crypto, unlock, pendingAuth)
 ├── hooks/                # React hooks (useAuth, useCapsules, etc.)
 │
 ├── pages/                # Page components (organized by route)
@@ -38,22 +41,27 @@ src/
 │   ├── people/
 │   ├── security/
 │   ├── activity/
-│   └── tokenized/
+│   └── static/           # Privacy, Terms, HowItWorks (public, no auth)
 │
 ├── components/           # Reusable components
 │   ├── layout/           # AppShell, BottomNav, TopBar
-│   ├── ui/               # Button, Input, Card, Modal, etc.
-│   ├── capsule/          # Capsule-specific components
-│   └── beneficiary/      # Beneficiary-specific components
+│   ├── ui/                # Button, Input, Card, Modal, etc.
+│   ├── auth/              # UnlockModal
+│   ├── capsule/           # Capsule-specific components
+│   └── beneficiary/       # Beneficiary-specific components
 │
 ├── types/                # TypeScript types
 │   ├── api.ts            # API response types
 │   └── crypto.ts         # Crypto-related types
 │
-└── utils/                # Utility functions
-    ├── dates.ts          # Date formatting
-    ├── audit.ts          # Event type labels
-    └── storage.ts        # Supabase Storage helpers
+├── utils/                # Utility functions
+│   ├── dates.ts           # Date formatting
+│   ├── audit.ts           # Event type labels
+│   ├── storage.ts         # Supabase Storage helpers
+│   ├── media-upload.ts    # Encrypt → upload → thumbnail → confirm pipeline
+│   └── outbox.ts          # Offline-queued action retry
+│
+└── test/                 # Vitest unit/component tests
 ```
 
 ## Key Implementation Notes
@@ -76,14 +84,22 @@ src/
 3. On login → retrieves encrypted CEK from API, re-derives wrapping key, decrypts CEK into memory.
 4. Token refresh handled automatically by Axios interceptor.
 
-### Tokenized Pages
-Pages like `/checkin/confirm`, `/emergency/pause` are accessed via email links and require NO authentication. They accept a token in the URL query parameter and call unauthenticated API endpoints.
+### Check-In Email Links
+`GET /checkin/confirm`, `GET /checkin/snooze`, and `GET /checkin/emergency/pause`
+are backend endpoints, not frontend routes — clicking a link in a check-in or
+grace-period email hits the FastAPI backend directly, which validates the
+single-use token and returns a small standalone HTML confirmation/error page
+(see `backend/app/api/checkin.py`). The frontend never renders these; there is
+no corresponding `pages/` folder for them.
 
 ### Auto-Save & Drafts
-Capsule editor has local auto-save (localStorage draft key) but does NOT encrypt or upload to server until user clicks "Save Capsule".
+The capsule editor auto-saves to `localStorage` (keyed `draft_capsule_<id|new>`)
+while the vault is unlocked. Drafts are encrypted at rest with the in-memory CEK
+before being written (see `CapsuleEditor.tsx`), and are never uploaded to the
+server until the user clicks "Save Capsule".
 
 ### Responsive Design
-Mobile-first approach with Tailwind CSS. Uses bottom sheet modals on mobile for better UX. Bottom nav hidden on onboarding, auth, and tokenized pages.
+Mobile-first approach with Tailwind CSS. Uses bottom sheet modals on mobile for better UX. Bottom nav hidden on onboarding and auth pages.
 
 ## Setup & Development
 
@@ -134,28 +150,7 @@ All API calls go through the Axios client configured in `src/api/client.ts`:
 - Request/response interceptors for headers
 - Base URL from environment variable
 
-## Capacitor (iOS/Android)
-
-For now, the app is a PWA. Capacitor can wrap it later without code changes.
-
-To add native features:
-```bash
-npm install @capacitor/core @capacitor/app @capacitor/push-notifications
-```
-
-## Next Steps
-
-1. **Implement UI Components**: Button, Input, Card, Modal, BottomSheet, etc.
-2. **Implement Pages**: Landing, Login, Signup, Setup wizard, Dashboard, etc.
-3. **Implement Crypto**: PBKDF2 key derivation, AES-256-GCM encryption, BIP-39 phrase generation.
-4. **Integrate API Client**: Connect all pages to API endpoints.
-5. **Set up React Query**: Implement hooks for data fetching.
-6. **Add Error Handling**: Proper error states and user feedback.
-7. **Add Loading States**: Loading spinners and skeleton loaders.
-8. **Accessibility**: Ensure ARIA labels, keyboard navigation, focus management.
-9. **Testing**: Unit tests, integration tests, E2E tests.
-10. **Styling**: Refine Tailwind CSS, add custom styles, ensure dark mode support.
-
 ---
 
-*Refer to [legate_frontend_prd.md](../docs/legate_frontend_prd.md) for detailed PRD specifications.*
+*Refer to [Legate_PRD_v3_0.md](../implementation/Legate_PRD_v3_0.md) for the full product spec, and
+[Legate_Testers_Guide.md](../implementation/Legate_Testers_Guide.md) for a feature-by-feature testing walkthrough.*
