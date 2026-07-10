@@ -19,7 +19,7 @@ _CONFIRMED_HTML = """<!DOCTYPE html>
 <style>body{{font-family:sans-serif;max-width:600px;margin:80px auto;text-align:center;color:#1a1a1a}}
 h1{{color:#2e7d32}}p{{color:#555}}</style></head>
 <body><h1>&#x2714; You&rsquo;re confirmed</h1>
-<p>Your Legate timer has been reset. We&rsquo;ll check in with you again in {days} days.</p>
+<p>Your Legate timer has been reset. We&rsquo;ll check in with you again in {when}.</p>
 <p style="font-size:.85em;color:#999">You can close this tab.</p></body></html>"""
 
 _SNOOZED_HTML = """<!DOCTYPE html>
@@ -69,9 +69,17 @@ async def confirm_checkin(
     try:
         svc = CheckInService(db)
         result = await svc.confirm(token, ip, user_agent)
-        # B11: show the schedule's real interval, not a hardcoded 30.
-        days = result.get("interval_days") or 30
-        return HTMLResponse(content=_CONFIRMED_HTML.format(days=days), status_code=200)
+        # B11: show the schedule's real interval, not a hardcoded 30 — and
+        # (S7) prefer the demo-mode minute override when set, same precedence
+        # as interval_delta(), so this page never reports a stale day-based
+        # value for an account actually running on a minute cycle.
+        minutes = result.get("check_interval_minutes")
+        if minutes:
+            when = f"{minutes} minute{'s' if minutes != 1 else ''}"
+        else:
+            days = result.get("interval_days") or 30
+            when = f"{days} day{'s' if days != 1 else ''}"
+        return HTMLResponse(content=_CONFIRMED_HTML.format(when=when), status_code=200)
     except Exception as exc:
         code = getattr(exc, "status_code", 400)
         detail = getattr(exc, "detail", str(exc))

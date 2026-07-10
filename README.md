@@ -46,7 +46,10 @@ All three must be **private**.
 > **Note:** the backend accesses the database and storage exclusively with the
 > service-role key, so RLS policies are not required for the app to function.
 > Authoring and applying RLS policies (NFR-14, defense-in-depth) is a
-> **pre-public-launch TODO** — see `FINAL_AUDIT_REPORT.md` (D2).
+> **pre-public-launch TODO** — all authorization currently happens in the
+> FastAPI dependency layer only, with no database-level backstop. See
+> `implementation/Legate_PRD_v3_0.md` §2.3/§9 for the current, tracked status
+> of this and every other deferred item.
 
 ### 3. Enable email OTP auth
 
@@ -92,6 +95,8 @@ Copy `.env.example` to `.env` and fill in every value. The app refuses to start 
 | `STORAGE_QUOTA_BYTES` | — | Per-user storage quota (bytes). Default: `1073741824` (1 GiB) | — |
 | `ALERT_EMAIL` | — | Ops alert address for permanent delivery failures. Empty disables alert emails; audit rows are always written | — |
 | `NGINX_PORT` | — | Host port nginx publishes on. Default: `80` | — |
+| `DEMO_MODE` | — | When `true`, `PATCH /settings/checkin` accepts minute-level interval/grace/emergency-confirm overrides so a live demo can run the full check-in lifecycle in minutes instead of weeks. Server-enforced (403 when off), not just hidden in the UI. Default: `false` — leave off outside of an active demo | — |
+| `BEAT_INTERVAL_SECONDS` | — | Celery beat tick (seconds) for the dispatch/grace/trigger-promotion tasks. Default: `3600` (hourly). Only lower this (e.g. `60`) while `DEMO_MODE` is on — left low permanently, it ticks the grace-period check against every user every minute forever, which is a real cost, not just a demo convenience | — |
 
 ---
 
@@ -267,6 +272,22 @@ FR-35 asks for re-display of the existing recovery phrase. The recovery phrase i
 ### docker compose down and up
 
 `docker compose down` stops all containers. `docker compose up -d` restarts them. Database state persists (Supabase is managed). Redis queue state is cleared on `down -v`; Celery beat re-enqueues all periodic tasks within one schedule interval. This behaviour is acceptable and documented.
+
+### Recreating `api` without nginx serving stale 502s
+
+`nginx.conf` proxies to the `api` container by hostname (`proxy_pass http://api:8000/`), which nginx resolves to a container IP **once, at its own startup** — it does not re-resolve afterward. `docker-compose.yml`'s `depends_on: api: restart: true` is meant to auto-restart nginx whenever `api` is recreated, but this only fires reliably on a full `docker compose up`. If you manually recreate a subset of services, e.g.:
+
+```bash
+docker compose up -d --force-recreate api worker beat
+```
+
+`api` gets a **new** container IP on the docker network, nginx keeps the old one, and every request 502s ("connection refused") until nginx is restarted. Always include `nginx` in the same command:
+
+```bash
+docker compose up -d --force-recreate api worker beat nginx
+```
+
+or, if you forget and it's already broken: `docker compose restart nginx`.
 
 ### Logs
 

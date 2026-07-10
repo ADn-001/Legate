@@ -54,7 +54,26 @@ async function decryptDraft(raw: string, cek: CryptoKey): Promise<DraftContent |
   }
 }
 
-export default function CapsuleEditor() {
+interface CapsuleEditorProps {
+  // Wizard-mode overrides. All optional — omitting every prop preserves the
+  // exact dashboard create/edit behavior this component already has.
+  // Named heading*, not title/subtitle, to avoid colliding with the
+  // capsule-title form field state declared below.
+  headingTitle?: string
+  headingSubtitle?: string
+  backTo?: string
+  // Called after a successful save instead of the default navigate to the
+  // capsule list — lets the onboarding wizard continue to the next step.
+  onSaved?: () => void
+  // If provided (create mode only), renders a "Skip for now" button next to
+  // Save, matching the wizard's other skippable steps.
+  onSkip?: () => void
+  // Narrower, wizard-style container (matches the other /setup/* steps)
+  // instead of the dashboard's full-page layout.
+  compact?: boolean
+}
+
+export default function CapsuleEditor({ headingTitle, headingSubtitle, backTo, onSaved, onSkip, compact }: CapsuleEditorProps = {}) {
   const navigate = useNavigate()
   const { id } = useParams()
   const isEdit = !!id
@@ -298,7 +317,11 @@ export default function CapsuleEditor() {
       // Invalidate the capsules cache so CapsuleList immediately fetches fresh
       // data rather than showing the stale [] from Dashboard's initial load.
       await queryClient.invalidateQueries({ queryKey: ['capsules'] })
-      navigate('/vault/capsules')
+      if (onSaved) {
+        onSaved()
+      } else {
+        navigate('/vault/capsules')
+      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to save capsule'
       setError(msg)
@@ -316,18 +339,18 @@ export default function CapsuleEditor() {
   }
 
   return (
-    <div className="min-h-screen bg-[#F0F2F5] p-4">
-      <div className="max-w-2xl mx-auto">
+    <div className={compact ? '' : 'min-h-screen bg-[#F0F2F5] p-4'}>
+      <div className={compact ? 'max-w-md mx-auto px-4 pb-8' : 'max-w-2xl mx-auto'}>
         {/* Header */}
         <div className="flex items-center gap-4 mb-6">
-          <button onClick={() => navigate('/vault/capsules')} className="p-2 hover:bg-white rounded-lg transition-colors">
+          <button onClick={() => navigate(backTo ?? '/vault/capsules')} className="p-2 hover:bg-white rounded-lg transition-colors">
             <ArrowLeft className="w-5 h-5 text-[#0D1117]" />
           </button>
           <div>
             <h1 className="text-2xl font-bold text-[#0D1117]">
-              {isEdit ? 'Edit Capsule' : 'Create Capsule'}
+              {headingTitle ?? (isEdit ? 'Edit Capsule' : 'Create Capsule')}
             </h1>
-            <p className="text-sm text-[#6B7280]">Secure your digital legacy</p>
+            <p className="text-sm text-[#6B7280]">{headingSubtitle ?? 'Secure your digital legacy'}</p>
           </div>
         </div>
 
@@ -467,9 +490,20 @@ export default function CapsuleEditor() {
         </SecurityBanner>
 
         {/* Save Button */}
-        <Button fullWidth loading={saving} onClick={handleSave} className="py-4 text-base">
-          {isEdit ? 'Update Capsule' : 'Save Capsule'}
-        </Button>
+        {onSkip && !isEdit ? (
+          <div className="flex gap-3">
+            <Button variant="secondary" fullWidth onClick={onSkip} disabled={saving}>
+              Skip for now
+            </Button>
+            <Button fullWidth loading={saving} onClick={handleSave} className="py-4 text-base">
+              Save Capsule
+            </Button>
+          </div>
+        ) : (
+          <Button fullWidth loading={saving} onClick={handleSave} className="py-4 text-base">
+            {isEdit ? 'Update Capsule' : 'Save Capsule'}
+          </Button>
+        )}
       </div>
 
       {/* T3: Delivery preview modal */}

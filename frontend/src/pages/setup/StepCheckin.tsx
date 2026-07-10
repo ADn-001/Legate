@@ -1,7 +1,9 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import { AlertTriangle } from 'lucide-react'
 import { settingsApi } from '../../api/settings'
+import { CheckinSchedule } from '../../types/api'
 import Button from '../../components/ui/Button'
 import Modal from '../../components/ui/Modal'
 
@@ -13,6 +15,11 @@ const MIN_CUSTOM_INTERVAL = 1
 const MAX_CUSTOM_INTERVAL = 365
 // Warn if the total window (interval + grace) drops below this many days
 const SHORT_WINDOW_WARNING_DAYS = 14
+// Demo-mode minute overrides (mirrors Security.tsx's "Apply Demo Schedule"
+// panel — this was previously the only place the demo controls existed,
+// forcing a detour to Settings after finishing onboarding).
+const MIN_DEMO_MINUTES = 1
+const MAX_DEMO_MINUTES = 1440
 
 export default function StepCheckin() {
   const navigate = useNavigate()
@@ -23,6 +30,37 @@ export default function StepCheckin() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [showShortWindowWarning, setShowShortWindowWarning] = useState(false)
+
+  // Demo-mode panel state — only rendered once we know the server has
+  // DEMO_MODE enabled (checkinSchedule?.demo_mode). Applying it fires its
+  // own request immediately, independent of the day-based Continue flow
+  // below, matching how Security.tsx's panel behaves.
+  const { data: checkinSchedule } = useQuery<CheckinSchedule>({
+    queryKey: ['checkin-schedule'],
+    queryFn: () => settingsApi.getCheckinSchedule().then(r => r.data),
+  })
+  const [demoIntervalMinutes, setDemoIntervalMinutes] = useState(2)
+  const [demoGraceMinutes, setDemoGraceMinutes] = useState(2)
+  const [demoEmergencyMinutes, setDemoEmergencyMinutes] = useState(2)
+  const [demoSaving, setDemoSaving] = useState(false)
+  const [demoMsg, setDemoMsg] = useState<string | null>(null)
+
+  const applyDemoSchedule = async () => {
+    setDemoSaving(true)
+    setDemoMsg(null)
+    try {
+      await settingsApi.updateCheckinSchedule({
+        check_interval_minutes: demoIntervalMinutes,
+        grace_period_minutes: demoGraceMinutes,
+        emergency_confirm_minutes: demoEmergencyMinutes,
+      })
+      setDemoMsg('Demo schedule applied.')
+    } catch {
+      setDemoMsg('Demo mode is disabled on the server, or the request failed.')
+    } finally {
+      setDemoSaving(false)
+    }
+  }
 
   const effectiveInterval = isCustom ? customInterval : interval
   const totalWindow = effectiveInterval + grace
@@ -149,6 +187,75 @@ export default function StepCheckin() {
             ))}
           </div>
         </div>
+
+        {/* Demo scheduling — only rendered when the server has DEMO_MODE
+            enabled (server still enforces this with a 403 regardless of
+            whether this section is visible). Applying it overrides the
+            day-based schedule above with minute-level timing, independent
+            of the Continue button below. */}
+        {checkinSchedule?.demo_mode && (
+          <div className="border-2 border-amber-400 bg-amber-50 rounded-xl p-4 space-y-3 mb-6">
+            <div className="flex items-center gap-2">
+              <span className="px-2 py-0.5 bg-amber-400 text-white text-[10px] font-bold rounded uppercase tracking-wide">
+                Demo
+              </span>
+              <p className="text-sm font-semibold text-amber-800">Demo scheduling (minutes)</p>
+            </div>
+            <p className="text-xs text-amber-700">
+              Overrides the day-based schedule above with minute-level timing so a live demo can
+              run the full check-in lifecycle in minutes instead of weeks.
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs text-amber-800 mb-1">Interval (minutes)</label>
+                <input
+                  type="number"
+                  min={MIN_DEMO_MINUTES}
+                  max={MAX_DEMO_MINUTES}
+                  value={demoIntervalMinutes}
+                  onChange={e => setDemoIntervalMinutes(Math.max(MIN_DEMO_MINUTES, Math.min(MAX_DEMO_MINUTES, Number(e.target.value))))}
+                  className="input-field w-full"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-amber-800 mb-1">Grace (minutes)</label>
+                <input
+                  type="number"
+                  min={MIN_DEMO_MINUTES}
+                  max={MAX_DEMO_MINUTES}
+                  value={demoGraceMinutes}
+                  onChange={e => setDemoGraceMinutes(Math.max(MIN_DEMO_MINUTES, Math.min(MAX_DEMO_MINUTES, Number(e.target.value))))}
+                  className="input-field w-full"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs text-amber-800 mb-1">
+                Emergency confirm window (minutes)
+              </label>
+              <input
+                type="number"
+                min={MIN_DEMO_MINUTES}
+                max={MAX_DEMO_MINUTES}
+                value={demoEmergencyMinutes}
+                onChange={e => setDemoEmergencyMinutes(Math.max(MIN_DEMO_MINUTES, Math.min(MAX_DEMO_MINUTES, Number(e.target.value))))}
+                className="input-field w-full"
+              />
+              <p className="text-[11px] text-amber-700 mt-1">
+                Only matters once you've added an emergency contact (normally 48 hours) — replaces
+                that real-time wait with minutes so the pending-confirmation branch can be demoed too.
+              </p>
+            </div>
+            {demoMsg && (
+              <p className={`text-sm ${demoMsg === 'Demo schedule applied.' ? 'text-green-700' : 'text-red-600'}`}>
+                {demoMsg}
+              </p>
+            )}
+            <Button loading={demoSaving} onClick={applyDemoSchedule}>
+              Apply Demo Schedule
+            </Button>
+          </div>
+        )}
 
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
           <p className="text-sm text-[#3D4F6B]">

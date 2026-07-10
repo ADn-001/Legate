@@ -69,6 +69,11 @@ class CheckInService:
             "status": "confirmed",
             "next_due": next_due,
             "interval_days": schedule.interval_days if schedule else None,
+            # Demo mode: minute override takes precedence for display too,
+            # same precedence rule as interval_delta() above — otherwise this
+            # page reports the stale day-based value while a demo account is
+            # actually running on a minute cycle.
+            "check_interval_minutes": schedule.check_interval_minutes if schedule else None,
         }
 
     async def snooze(self, token: str, days: int) -> dict:
